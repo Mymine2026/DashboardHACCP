@@ -1,21 +1,33 @@
-MIT License
+# Changelog
 
-Copyright (c) 2026 Mymine Srl
+All notable changes to MyMine Dashboard are documented here.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+---
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+## [1.0.0] — 2026-03-14
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+### Added
+- Initial public release
+- Client management (add, edit, delete) with sensor EUI assignment
+- Live dashboard with temperature, humidity and battery charts (Chart.js)
+- Configurable alarm thresholds per client (T min/max, humidity min/max)
+- Email alerts via Gmail SMTP with HTML formatting
+- SMS alerts via Twilio REST API
+- Automatic E.164 phone normalization for Italian numbers
+- ASCII sanitization of SMS body (replaces `°C`, accented chars)
+- Daily PDF report at 09:00 — 24 hourly averages for previous day
+- On-demand PDF report download from dashboard
+- Auto-generated username + password per client
+- "Send credentials" button emails login info to client
+- Edit existing clients without losing stored credentials
+- Server diagnostics banner with write-test on every save
+- `/api/test_notify` endpoint for testing email and SMS independently
+- `/api/status` health-check endpoint
+- Sensor list upload from `.txt` file (tab/comma/semicolon separated)
+- Zero external Python dependencies — stdlib only
+- Single-file deployment
+
+### Architecture
+- Embedded HTML/JS frontend (no build step, no npm)
+- PDF generation in pure Python (no reportlab, fpdf, or wkhtmltopdf)
+- JSON flat-file storage (`clients.json`, `alerts.json`)
