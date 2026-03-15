@@ -4,17 +4,10 @@ WORKDIR /app
 
 COPY trackpac_server.py .
 
-# Runtime env vars — set these in Dokploy Environment section:
-#   TRACKPAC_API_KEY    your Trackpac API key
-#   SMTP_USER           email for sending alerts
-#   SMTP_PASS           Gmail App Password (16 chars)
-#   TWILIO_ACCOUNT_SID  Twilio SID
-#   TWILIO_AUTH_TOKEN   Twilio token
-#   TWILIO_FROM_NUMBER  Twilio phone (+15551234567)
-#   ADMIN_USER          admin email (default: filippo@mymine.io)
-#   ADMIN_PASS          admin password (default: Mymine2026!)
-#   DATA_DIR            /app (mount a volume here to persist data)
-#   PORT                3000 (Dokploy default)
+# Set these in Dokploy > Environment Variables:
+# TRACKPAC_API_KEY, SMTP_USER, SMTP_PASS
+# TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
+# ADMIN_USER, ADMIN_PASS, DATA_DIR=/app, PORT=3000
 
 ENV PORT=3000
 ENV PYTHONUNBUFFERED=1
