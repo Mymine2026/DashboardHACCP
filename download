@@ -1,35 +1,39 @@
-# ── Runtime data (may contain personal info) ─────────────────────────────────
-clients.json
-alerts.json
+version: '3.8'
 
-# ── Local config overrides ────────────────────────────────────────────────────
-config_local.py
-.env
+services:
+  umami-db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: ${UMAMI_DB_PASSWORD:-changeme123}
+    volumes:
+      - umami-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-# ── Python ────────────────────────────────────────────────────────────────────
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.egg-info/
-dist/
-build/
-.eggs/
-venv/
-.venv/
-env/
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    restart: always
+    depends_on:
+      umami-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://umami:${UMAMI_DB_PASSWORD:-changeme123}@umami-db:5432/umami
+      DATABASE_TYPE: postgresql
+      APP_SECRET: ${UMAMI_APP_SECRET:-supersecretchangeme}
+    ports:
+      - "3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.umami.rule=Host(`${UMAMI_DOMAIN}`)"
+      - "traefik.http.routers.umami.entrypoints=websecure"
+      - "traefik.http.routers.umami.tls.certresolver=letsencrypt"
+      - "traefik.http.services.umami.loadbalancer.server.port=3000"
 
-# ── OS ────────────────────────────────────────────────────────────────────────
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# ── Editors ───────────────────────────────────────────────────────────────────
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# ── Logs ─────────────────────────────────────────────────────────────────────
-*.log
+volumes:
+  umami-db-data:
