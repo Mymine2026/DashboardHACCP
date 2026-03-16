@@ -867,7 +867,7 @@ async function loadClients(){
           <button class="btn-creds" onclick="sendCreds(${i})">&#9993; Credenziali</button>
         </div>
         ${ranges.length?'<div class="ccard-ranges">'+ranges.map(r=>'<span class="crange">'+r+'</span>').join('')+'</div>':''}
-      </div>\`;
+      </div>`;
     }).join('');
   }catch(e){console.error('loadClients error:',e);}
 }
