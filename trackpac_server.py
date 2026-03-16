@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-16 11:04:16'
+BUILD_TS    = '2026-03-16 11:44:32'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -84,11 +84,24 @@ def load_clients():
     with open(DATA) as f:
         content = f.read().strip()
     if not content: return []
-    try: return json.loads(content)
+    try: clients = json.loads(content)
     except: return []
+    changed = False
+    for c in clients:
+        if "eui" in c and "sensori" not in c:
+            c["sensori"] = [{"eui": c["eui"], "nome_frigo": c.get("nome_frigo","")}]
+            changed = True
+    if changed: save_clients(clients)
+    return clients
 
 def save_clients(lst):
     with open(DATA,"w") as f: json.dump(lst,f,indent=2,ensure_ascii=False)
+
+def get_client_sensor(client, idx=0):
+    sensori = client.get("sensori", [])
+    if sensori and idx < len(sensori):
+        return sensori[idx]
+    return {"eui": client.get("eui",""), "nome_frigo": client.get("nome_frigo","")}
 
 def load_alerts():
     if not os.path.exists(ALERTS_FILE): return {}
@@ -204,7 +217,10 @@ def generate_pdf_report(client):
         body, code = call_api("/device/")
         if code != 200: return None, f"API error {code}"
         devs = json.loads(body)
-        dev = next((d for d in devs if (d.get("dev_eui","")).upper() == client["eui"].upper()), None)
+        _si  = client.get("_sensor_idx", 0)
+        _s   = get_client_sensor(client, _si)
+        _eui = _s.get("eui", "")
+        dev  = next((d for d in devs if (d.get("dev_eui","")).upper() == _eui.upper()), None)
         if not dev: return None, "Device non trovato"
         dev_id = dev["id"]
         yday = datetime.now(timezone.utc) - timedelta(days=1)
@@ -273,11 +289,9 @@ def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
     ROW_H  = 19                 # table row height (pt)
 
     # ── Column positions (x start of each column) ─────────
-    # Ora | Temperatura | Umidita | N campioni
-    # widths must sum to W - ML - MR = 505
-    COL_X = [ML + 6, ML + 96, ML + 256, ML + 396]   # left edge of text
-    COL_W = [        84,       150,       130,       100]  # width (for bg rects)
-    # COL_W sums to 464; total with padding: 464 + 12 (left pad) = 476 < 505  ✓
+    # Ora | Temperatura | Umidita  (3 colonne)
+    COL_X = [ML + 6, ML + 110, ML + 320]   # left edge of text
+    COL_W = [       98,        200,         207]      # width
 
     # ── Color helpers ─────────────────────────────────────
     C_DARKBG = "0.122 0.302 0.251"   # #1F4E3D
@@ -301,20 +315,16 @@ def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
         g(f"BT /{font} {size} Tf {x:.1f} {y:.1f} Td ({esc(text)}) Tj ET")
 
     # ══════════════════════════════════════════════════════
-    # HEADER BAR
+    # HEADER BAR  (logo PNG via XObject Im1)
     # ══════════════════════════════════════════════════════
     rect(ML, H-72, W-ML-MR, 52, C_DARKBG)
-    # Logo image inline (XObject)
-    import base64 as _b64
-    _logo_raw = _b64.b64decode(HACCP_LOGO_B64)
-    _logo_w, _logo_h = 97, 65   # original pixel dims
-    # Scale to fit header height (52pt): height=40, maintain aspect
-    _ph = 40; _pw = int(_logo_w * _ph / _logo_h)
-    _px = ML + 8; _py = H - 67
-    g(f"q {_pw} 0 0 {_ph} {_px} {_py} cm")
-    g("/Im1 Do Q")
-    txt(ML + _pw + 16, H-50, "F2", 16, "1 1 1", "mymine")
-    txt(ML + _pw + 16, H-64, "F1", 8, "0.5 0.8 0.65", "REPORT MISURAZIONI AMBIENTALI")
+    # Logo: scale to fit 40pt height, maintain aspect 97x65
+    _lw, _lh = 97, 65
+    _ph = 38; _pw = int(_lw * _ph / _lh)   # ~57pt wide
+    _px = ML + 8; _py = H - 68
+    g(f"q {_pw} 0 0 {_ph} {_px} {_py} cm /Im1 Do Q")
+    txt(ML + _pw + 14, H-50, "F2", 15, "1 1 1", "mymine")
+    txt(ML + _pw + 14, H-63, "F1", 8, "0.5 0.8 0.65", "REPORT MISURAZIONI AMBIENTALI")
     txt(W-MR-160, H-52, "F1", 9, "1 1 1", f"Data: {date_str}")
 
     # ══════════════════════════════════════════════════════
@@ -340,14 +350,22 @@ def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
     h_avg_v = (sum(all_H)/len(all_H)) if all_H else None
     n_ore   = sum(1 for _, T, _ in hour_rows if T is not None)
 
+    # Battery: last available reading from raw_rows
+    all_B = [r["B"] for r in raw_rows if r.get("B") is not None]
+    last_B = all_B[-1] if all_B else None
+    is_volt = last_B is not None and last_B < 10
+    b_label = f"{last_B:.2f} V" if (last_B is not None and is_volt) else (f"{last_B:.0f} %" if last_B is not None else "--")
+    b_min   = f"Min: {min(all_B):.2f}{'V' if is_volt else '%'}" if all_B else "Min: --"
+    b_max   = f"Max: {max(all_B):.2f}{'V' if is_volt else '%'}" if all_B else "Max: --"
+
     box_w = (W - ML - MR - 12) // 3   # ~163 pt each
     for i, (title, bar_col, lines_txt) in enumerate([
         ("Temperatura", C_RED,
          [f"Min: {fmt(t_min_v)} grC", f"Max: {fmt(t_max_v)} grC", f"Media: {fmt(t_avg_v)} grC"]),
         ("Umidita relativa", C_BLUE,
          [f"Min: {fmt(h_min_v,0)} %", f"Max: {fmt(h_max_v,0)} %", f"Media: {fmt(h_avg_v,0)} %"]),
-        ("Campioni", C_GREEN,
-         [f"Frame totali: {len(raw_rows)}", f"Ore con dati: {n_ore}/24", ""]),
+        ("Batteria sensore", C_GREEN,
+         [f"Ultimo: {b_label}", b_min, b_max]),
     ]):
         bx = ML + i * (box_w + 6)
         rect(bx, y-58, box_w, 58, C_LINE)
@@ -362,7 +380,7 @@ def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
     y -= 74
     rect(ML, y-ROW_H, W-ML-MR, ROW_H, C_DARKBG)
     for ci, (label, cx) in enumerate(zip(
-            ["Ora", "Temperatura (grC)", "Umidita (%)", "N. campioni"], COL_X)):
+            ["Ora", "Temperatura (grC)", "Umidita (%)"], COL_X)):
         txt(cx, y-13, "F2", 8, "1 1 1", label)
 
     # Column separator lines in header
@@ -396,15 +414,13 @@ def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
             rect(ML, y-ROW_H+1, W-ML-MR, ROW_H-1, C_LIGHT)
 
         # Row data
-        n_samples = sum(1 for r in raw_rows if r["ts"].hour == hour)
         hour_str = f"{hour:02d}:00 - {hour:02d}:59"
         T_str    = (fmt(T_val) + " grC") if T_val is not None else "--"
         H_str    = (fmt(H_val, 0) + " %") if H_val is not None else "--"
-        N_str    = str(n_samples) if n_samples else "--"
 
-        cell_txt = [hour_str, T_str, H_str, N_str]
+        cell_txt = [hour_str, T_str, H_str]
         cell_col = [C_TEXT, C_RED if alarm_t else C_TEXT,
-                    C_BLUE if alarm_h else C_TEXT, C_SUB]
+                    C_BLUE if alarm_h else C_TEXT]
 
         for ci, (v, cx, cc) in enumerate(zip(cell_txt, COL_X, cell_col)):
             txt(cx, y-13, "F1", 9, cc, v)
@@ -439,11 +455,56 @@ def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
     obj(4, f"<< /Length {len(stream_bytes)} >>", stream_bytes)
     obj(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     obj(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
-    import base64 as _b64i
-    _img_bytes = _b64i.b64decode(HACCP_LOGO_B64)
-    obj(7, f"<< /Type /XObject /Subtype /Image /Width 97 /Height 65 "
-           f"/ColorSpace /DeviceRGB /BitsPerComponent 8 "
-           f"/Filter /DCTDecode /Length {len(_img_bytes)} >>", _img_bytes)
+    import base64 as _b64i, zlib as _zlib
+    # Decode PNG and extract raw RGB pixels for PDF image stream
+    _png_bytes = _b64i.b64decode(HACCP_LOGO_B64)
+    # Parse PNG: find IDAT chunks and reconstruct RGB pixels
+    def _png_to_rgb(data):
+        import struct, zlib
+        assert data[:8] == b"\x89PNG\r\n\x1a\n"
+        idat = b""
+        pos = 8
+        w = h = 0
+        while pos < len(data):
+            length = struct.unpack(">I", data[pos:pos+4])[0]
+            ctype  = data[pos+4:pos+8]
+            chunk  = data[pos+8:pos+8+length]
+            if ctype == b"IHDR":
+                w, h = struct.unpack(">II", chunk[:8])
+            elif ctype == b"IDAT":
+                idat += chunk
+            elif ctype == b"IEND":
+                break
+            pos += 12 + length
+        raw = zlib.decompress(idat)
+        # Detect bit depth / color type from IHDR
+        bit_depth  = data[24]
+        color_type = data[25]  # 6=RGBA, 2=RGB
+        stride = w * (4 if color_type == 6 else 3) + 1
+        rgb = bytearray()
+        for row in range(h):
+            filt = raw[row * stride]
+            row_bytes = bytearray(raw[row * stride + 1 : row * stride + stride])
+            if filt == 1:  # Sub
+                for i in range(3 if color_type==2 else 4, len(row_bytes)):
+                    row_bytes[i] = (row_bytes[i] + row_bytes[i - (4 if color_type==6 else 3)]) & 0xFF
+            elif filt == 2:  # Up (only first row safe)
+                pass
+            for px in range(w):
+                base = px * (4 if color_type == 6 else 3)
+                rgb += bytes([row_bytes[base], row_bytes[base+1], row_bytes[base+2]])
+        return w, h, bytes(rgb)
+    try:
+        _iw, _ih, _rgb = _png_to_rgb(_png_bytes)
+        import zlib as _zlib2
+        _img_stream = _zlib2.compress(_rgb, 6)
+        obj(7, (f"<< /Type /XObject /Subtype /Image /Width {_iw} /Height {_ih} "
+                f"/ColorSpace /DeviceRGB /BitsPerComponent 8 "
+                f"/Filter /FlateDecode /Length {len(_img_stream)} >>"), _img_stream)
+    except Exception as _e:
+        # Fallback: no image object
+        obj(7, "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 "
+               "/ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>", b"\x80")
 
     buf     = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"   # header + binary comment
     offsets = {}
@@ -690,11 +751,7 @@ input:checked+.slider::before{transform:translateX(16px)}
         <option value="24E124785F201049">24E124785F201049 — Sensore Frigo</option>
         <option value="24E124785D499946">24E124785D499946 — Sensore Poggio</option>
       </select>
-      <div style="margin-top:7px;display:flex;align-items:center;gap:8px">
-        <label class="btn-upload-sensor" style="cursor:pointer" onclick="document.getElementById('sF').click()">📂 Aggiorna lista (.txt)</label>
-        <input type="file" id="sF" accept=".txt" style="display:none">
-        <span id="sensorFileLabel" style="font-family:var(--mono);font-size:9px;color:var(--dim)">2 sensori in lista</span>
-      </div>
+
     </div>
     <div class="sec">🌡️ Soglie di allarme</div>
     <div class="row4">
@@ -810,32 +867,6 @@ async function addClient(){
   loadClients();
 }
 
-// ─── LOAD SENSORS FROM FILE ─────────────────────────────────────
-document.getElementById('sF').addEventListener('change',function(e){
-  const file=e.target.files[0]; if(!file)return;
-  const reader=new FileReader();
-  reader.onload=function(ev){
-    const raw=ev.target.result;
-    const lines=raw.split(/[\\r\\n]+/).map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
-    const sel=document.getElementById('fEui');
-    sel.innerHTML='<option value="">— seleziona sensore —</option>';
-    let n=0;
-    lines.forEach(line=>{
-      const parts=line.split(/[\t,;]+/);
-      const eui=parts[0].replace(/[^0-9A-Fa-f]/g,'').toUpperCase();
-      if(eui.length<8)return;
-      const desc=parts.slice(1).join(' ').trim()||'Sensore '+eui;
-      const opt=document.createElement('option');
-      opt.value=eui; opt.textContent=eui+' — '+desc;
-      sel.appendChild(opt); n++;
-    });
-    if(n===1)sel.selectedIndex=1;
-    document.getElementById('sensorFileLabel').textContent=n+' sensori caricati';
-    fl(n+' sensori caricati');
-  };
-  reader.readAsText(file);
-});
-
 // ─── LOAD CLIENTS LIST ──────────────────────────────────────────
 async function loadClients(){
   try{
@@ -846,7 +877,8 @@ async function loadClients(){
     const box=document.getElementById('clist');
     if(!cls.length){box.innerHTML='<div class="empty">Nessun cliente registrato.</div>';return;}
     box.innerHTML=cls.map((c,i)=>{
-      const hasAlarm=alarmSet.has(c.eui);
+      const euids=(c.sensori||[{eui:c.eui||''}]).map(s=>s.eui||'');
+      const hasAlarm=euids.some(e=>alarmSet.has(e));
       const badge=hasAlarm?'<span class="alarm-badge">⚠ ALLARME</span>':'';
       const ranges=[];
       if(c.t_min!=null)ranges.push('T° min '+c.t_min+'°C');
@@ -858,7 +890,7 @@ async function loadClients(){
         <div class="ccard-details">
           ${c.email?`✉ ${c.email}<br>`:''}${c.telefono?`📞 ${c.telefono}<br>`:''}
           P.IVA: ${c.piva||'—'} &nbsp;·&nbsp; 📍 ${c.indirizzo||'—'}<br>
-          <span class="ccard-eui">📡 ${c.eui}</span>
+          <span class="ccard-eui">${(c.sensori||[{eui:c.eui||"",nome_frigo:""}]).map(s=>"❄️ "+(s.nome_frigo||s.eui||"—")).join(" &nbsp;·&nbsp; ")}</span>
           ${c.notif_email?'&nbsp;·&nbsp; ✉ Email':''}${c.notif_sms?'&nbsp;·&nbsp; 📱 SMS':''}
         </div>
         <div class="ccard-actions" onclick="event.stopPropagation()">
@@ -933,14 +965,13 @@ async function editClient(i){
   g('fHmax').value=c.h_max!=null?c.h_max:'';
   g('fNotifEmail').checked=!!c.notif_email;
   g('fNotifSms').checked=!!c.notif_sms;
-  // Set sensor
-  const sel=g('fEui');
-  let found=false;
-  for(let o of sel.options){if(o.value===c.eui){sel.value=c.eui;found=true;break;}}
-  if(!found&&c.eui){
-    const opt=document.createElement('option');
-    opt.value=c.eui;opt.textContent=c.eui;sel.appendChild(opt);sel.value=c.eui;
-  }
+  // Set sensori
+  const sList=document.getElementById('sensoriList');
+  sList.innerHTML='';
+  const sens=c.sensori||[];
+  if(sens.length>0){sens.forEach(s=>addSensoreRow(s.nome_frigo||'',s.eui||''));}
+  else if(c.eui){addSensoreRow(c.nome_frigo||'',c.eui);}
+  else{addSensoreRow();}
   // Change button to Update
   const btn=document.querySelector('.btn-submit');
   btn.textContent='💾 Aggiorna cliente';
@@ -955,7 +986,7 @@ async function updateClient(idx){
   const body={
     cognome:g('fCognome'), nome:g('fNome'), piva:g('fPiva'),
     email:g('fEmail'), telefono:g('fTel'), indirizzo:g('fAddr'),
-    eui:document.getElementById('fEui').value,
+    sensori:getSensori(), eui:getSensori().length>0?getSensori()[0].eui:'',
     t_min:g('fTmin')===''?null:parseFloat(g('fTmin')),
     t_max:g('fTmax')===''?null:parseFloat(g('fTmax')),
     h_min:g('fHmin')===''?null:parseFloat(g('fHmin')),
@@ -1009,6 +1040,7 @@ async function checkNow(){
 }
 function go(i){location.href='/dashboard?client='+i;}
 function fl(m){const e=document.getElementById('flash');e.textContent=m;e.style.display='block';setTimeout(()=>e.style.display='none',4000);}
+addSensoreRow();
 runDiag();
 loadClients();
 setInterval(loadClients,30000);
@@ -1125,7 +1157,7 @@ select:hover{border-color:var(--green);color:var(--text)}
     <div class="cval" id="vB">—<span class="cunit">%</span></div>
     <div class="cts" id="vBts"></div></div>
   <div class="card" style="--c:#6B4FA0"><div class="card-top"></div><div class="card-glow"></div>
-    <span class="cicon">📡</span><div class="clabel">Frame ricevuti</div>
+    <span class="cicon">📡</span><div class="clabel">Misurazioni ricevute</div>
     <div class="cval" id="vN">—</div><div class="cts" id="vNs"></div></div>
 </div>
 <div class="cgrid">
