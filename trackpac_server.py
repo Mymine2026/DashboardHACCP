@@ -18,10 +18,12 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-16 11:44:32'
+BUILD_TS    = '2026-03-16 11:59:45'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
+_SCRIPT_DIR  = _os.path.dirname(_os.path.abspath(__file__))
+SENSORI_FILE = _os.path.join(_SCRIPT_DIR, "sensori.txt")
 
 # SMTP config (Gmail: myaccount.google.com > Sicurezza > Password per le app)
 SMTP_HOST = _os.environ.get("SMTP_HOST", "smtp.gmail.com")
@@ -96,6 +98,26 @@ def load_clients():
 
 def save_clients(lst):
     with open(DATA,"w") as f: json.dump(lst,f,indent=2,ensure_ascii=False)
+
+def load_sensori():
+    """Carica lista sensori da sensori.txt (EUI<TAB>descrizione)."""
+    sensori = []
+    cr = chr(13)
+    for path in [SENSORI_FILE, _os.path.join(_DATA_DIR, "sensori.txt")]:
+        if _os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip().replace(cr, "")
+                        if not line or line.startswith("#"): continue
+                        parts = line.split("\t")
+                        eui = parts[0].strip().upper()
+                        desc = parts[1].strip() if len(parts) > 1 else eui
+                        if len(eui) >= 8:
+                            sensori.append({"eui": eui, "desc": desc})
+            except Exception: pass
+            break
+    return sensori
 
 def get_client_sensor(client, idx=0):
     sensori = client.get("sensori", [])
@@ -713,6 +735,11 @@ input:checked+.slider::before{transform:translateX(16px)}
 .btn-check:disabled{opacity:.5;cursor:wait}
 .btn-upload-sensor{display:inline-flex;align-items:center;background:var(--bg3);border:1px solid var(--line2);color:var(--green2);border-radius:7px;padding:5px 10px;font-family:var(--mono);font-size:9px;font-weight:600;cursor:pointer;transition:all .2s;letter-spacing:.04em}
 .btn-upload-sensor:hover{border-color:var(--green);background:#fff}
+.sensore-row{display:flex;gap:8px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:9px;padding:8px 10px}
+.sensore-row .inp-eui,.sensore-row .inp-frigo{flex:1;background:#F0F6F3;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-family:var(--mono);font-size:11px;color:var(--text);outline:none}
+.sensore-row .inp-frigo{font-family:var(--sans);font-size:12px}
+.sensore-row .inp-eui:focus,.sensore-row .inp-frigo:focus{border-color:var(--green);background:#fff}
+.sensore-row .btn-rm{background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:0 4px;opacity:.7;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -744,14 +771,15 @@ input:checked+.slider::before{transform:translateX(16px)}
     <div class="field"><label>Telefono</label><input id="fTel" type="tel" placeholder="+39 333 1234567"></div>
     <div class="divider"></div>
     <div class="field"><label>Indirizzo installazione</label><input id="fAddr" placeholder="Via Roma, 1 – Milano"></div>
-    <div class="field">
-      <label>Codice sensore</label>
-      <select id="fEui">
-        <option value="">— seleziona sensore —</option>
-        <option value="24E124785F201049">24E124785F201049 — Sensore Frigo</option>
-        <option value="24E124785D499946">24E124785D499946 — Sensore Poggio</option>
-      </select>
-
+    <div class="sec">&#10052; Frigoriferi / Sensori</div>
+    <div id="sensoriList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+      <button type="button" onclick="addSensoreRow()" style="background:var(--bg3);border:1px solid var(--line2);color:var(--green2);border-radius:8px;padding:7px 14px;font-family:var(--mono);font-size:10px;cursor:pointer;font-weight:600">+ Aggiungi frigorifero</button>
+      <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;background:var(--bg3);border:1px solid var(--line2);color:var(--sub);border-radius:8px;padding:7px 12px;font-family:var(--mono);font-size:10px;font-weight:600">
+        &#128194; Aggiorna lista sensori
+        <input type="file" id="sF" accept=".txt" style="display:none">
+      </label>
+      <span id="sensorFileLabel" style="font-family:var(--mono);font-size:10px;color:var(--dim)"></span>
     </div>
     <div class="sec">🌡️ Soglie di allarme</div>
     <div class="row4">
@@ -816,17 +844,42 @@ async function runDiag(){
 }
 runDiag();
 
+// ─── SENSORI HELPERS ─────────────────────────────────────────────
+let _sensoriDb=[];
+
+function addSensoreRow(nome_frigo,eui_val){
+  nome_frigo=nome_frigo||''; eui_val=eui_val||'';
+  const list=document.getElementById('sensoriList');
+  const dlId='dl'+Date.now()+Math.random().toString(36).slice(2);
+  const opts=_sensoriDb.map(s=>'<option value="'+s.eui+'">'+s.eui+' — '+s.desc+'</option>').join('');
+  const row=document.createElement('div');
+  row.className='sensore-row';
+  row.innerHTML='<input list="'+dlId+'" placeholder="EUI sensore (es. 24E12478...)" value="'+eui_val+'" class="inp-eui"><datalist id="'+dlId+'">'+opts+'</datalist>'
+    +'<input placeholder="Nome frigorifero" value="'+nome_frigo+'" class="inp-frigo">'
+    +'<button class="btn-rm" type="button" onclick="this.parentNode.remove()" title="Rimuovi">✕</button>';
+  list.appendChild(row);
+}
+
+function getSensori(){
+  return Array.from(document.querySelectorAll('#sensoriList .sensore-row')).map(r=>({
+    eui:r.querySelector('.inp-eui').value.trim().toUpperCase(),
+    nome_frigo:r.querySelector('.inp-frigo').value.trim()
+  })).filter(s=>s.eui.length>=8);
+}
+
 // ─── ADD CLIENT ─────────────────────────────────────────────────
 async function addClient(){
   const nome=document.getElementById('fNome').value.trim();
   const cognome=document.getElementById('fCognome').value.trim();
-  const eui=document.getElementById('fEui').value;
+  const sensori=getSensori();
   if(!nome||!cognome){alert('Inserisci nome e cognome');return;}
-  if(!eui){alert('Seleziona un sensore dalla lista');return;}
+  if(sensori.length===0){alert('Aggiungi almeno un frigorifero con il suo codice EUI sensore');return;}
   const g=id=>document.getElementById(id).value.trim();
   const payload={
     nome,cognome,piva:g('fPiva'),email:g('fEmail'),telefono:g('fTel'),
-    indirizzo:g('fAddr'),eui,
+    indirizzo:g('fAddr'),
+    eui:sensori[0].eui,
+    sensori:sensori,
     t_min:g('fTmin')===''?null:parseFloat(g('fTmin')),
     t_max:g('fTmax')===''?null:parseFloat(g('fTmax')),
     h_min:g('fHmin')===''?null:parseFloat(g('fHmin')),
@@ -852,11 +905,11 @@ async function addClient(){
     return;
   }
   // Reset form
-  ['fNome','fCognome','fPiva','fEmail','fTel','fAddr','fTmin','fTmax','fHmin','fHmax','fTgChatId']
-    .forEach(id=>document.getElementById(id).value='');
-  document.getElementById('fEui').value='';
+  ['fNome','fCognome','fPiva','fEmail','fTel','fAddr','fTmin','fTmax','fHmin','fHmax']
+    .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('sensoriList').innerHTML='';
+  addSensoreRow();
   document.getElementById('fNotifEmail').checked=true;
-  document.getElementById('fNotifTg').checked=false;
   document.getElementById('fNotifSms').checked=false;
   const nl=String.fromCharCode(10);
   fl('Cliente salvato! Credenziali: '+result.username+' / '+result.password);
@@ -966,8 +1019,7 @@ async function editClient(i){
   g('fNotifEmail').checked=!!c.notif_email;
   g('fNotifSms').checked=!!c.notif_sms;
   // Set sensori
-  const sList=document.getElementById('sensoriList');
-  sList.innerHTML='';
+  document.getElementById('sensoriList').innerHTML='';
   const sens=c.sensori||[];
   if(sens.length>0){sens.forEach(s=>addSensoreRow(s.nome_frigo||'',s.eui||''));}
   else if(c.eui){addSensoreRow(c.nome_frigo||'',c.eui);}
@@ -1040,10 +1092,40 @@ async function checkNow(){
 }
 function go(i){location.href='/dashboard?client='+i;}
 function fl(m){const e=document.getElementById('flash');e.textContent=m;e.style.display='block';setTimeout(()=>e.style.display='none',4000);}
-addSensoreRow();
-runDiag();
-loadClients();
-setInterval(loadClients,30000);
+// ─── FILE UPLOAD SENSORI ────────────────────────────────────────
+document.getElementById('sF').addEventListener('change',function(e){
+  const file=e.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    _sensoriDb=[];
+    ev.target.result.split(String.fromCharCode(10)).forEach(function(line){
+      line=line.split(String.fromCharCode(13)).join('').trim();
+      if(!line||line[0]==='#')return;
+      const parts=line.split(String.fromCharCode(9));
+      const eui=(parts[0]||'').replace(/[^0-9A-Fa-f]/g,'').toUpperCase();
+      if(eui.length<8)return;
+      const desc=(parts[1]||'').trim()||('Sensore '+eui.slice(-6));
+      _sensoriDb.push({eui:eui,desc:desc});
+    });
+    document.getElementById('sensorFileLabel').textContent=_sensoriDb.length+' sensori caricati';
+    fl(_sensoriDb.length+' sensori caricati dal file');
+  };
+  reader.readAsText(file);
+});
+
+// ─── INIT ────────────────────────────────────────────────────────
+(async function(){
+  try{
+    const s=await fetch('/api/sensori');
+    if(s.ok){_sensoriDb=await s.json();}
+    if(_sensoriDb.length)
+      document.getElementById('sensorFileLabel').textContent=_sensoriDb.length+' sensori in lista';
+  }catch(e){}
+  addSensoreRow();
+  runDiag();
+  loadClients();
+  setInterval(loadClients,30000);
+})();
 </script>
 </body></html>"""
 
@@ -1625,7 +1707,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", "mm_sess=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
             self.end_headers(); return
 
-        # ── /api/status is public (used by runDiag before auth check) ──
+        # ── Public endpoints (no auth required) ──
         if path == "/api/status":
             writable=False
             try:
@@ -1634,6 +1716,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except: pass
             self.send_json({"ok":True,"data_file":DATA,"writable":writable,
                 "clients":len(load_clients()),"build":BUILD_TS})
+            return
+        if path == "/api/sensori":
+            self.send_json(load_sensori())
             return
 
         # ── Auth required for all other routes ──

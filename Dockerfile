@@ -3,6 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 COPY trackpac_server.py .
+COPY sensori.txt .
 
 # Set these in Dokploy > Environment Variables:
 # TRACKPAC_API_KEY, SMTP_USER, SMTP_PASS
