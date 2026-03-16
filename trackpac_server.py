@@ -732,46 +732,29 @@ async function runDiag(){
   const bar=document.getElementById('statusBar');
   const msg=document.getElementById('statusMsg');
   bar.style.background='#FFF3CD'; bar.style.borderColor='#F59E0B'; bar.style.color='#92400E';
-  msg.textContent='⏳ Test in corso...';
-  // Step 1: reach server
-  let status;
+  msg.textContent='Test connessione...';
   try{
     const r=await fetch('/api/status');
-    status=await r.json();
+    if(r.status===401){
+      // Session expired — redirect to login
+      window.location.href='/login'; return;
+    }
+    const status=await r.json();
+    if(!status.ok){
+      bar.style.background='#FEF2F2'; bar.style.borderColor='#D94F4F'; bar.style.color='#B91C1C';
+      msg.innerHTML='Errore server: '+JSON.stringify(status);
+      return;
+    }
+    if(!status.writable){
+      bar.style.background='#FEF2F2'; bar.style.borderColor='#D94F4F'; bar.style.color='#B91C1C';
+      msg.innerHTML='Errore permessi scrittura — '+status.data_file;
+      return;
+    }
+    bar.style.background='#F0FBF6'; bar.style.borderColor='#1DB584'; bar.style.color='#0F5132';
+    msg.innerHTML='Server OK — Build: '+status.build+' — Clienti: '+status.clients;
   }catch(e){
     bar.style.background='#FEF2F2'; bar.style.borderColor='#D94F4F'; bar.style.color='#B91C1C';
-    msg.innerHTML='❌ SERVER NON RAGGIUNGIBILE — '+e.message+
-      '<br><small>Stai usando il file giusto? Hai Python in esecuzione nel terminale?</small>';
-    return;
-  }
-  if(!status.writable){
-    bar.style.background='#FEF2F2'; bar.style.borderColor='#D94F4F'; bar.style.color='#B91C1C';
-    msg.innerHTML='❌ ERRORE PERMESSI — '+status.data_file+
-      '<br><small>Sposta trackpac_server_21.py sul Desktop e riavvia</small>';
-    return;
-  }
-  // Step 2: test actual save
-  let saveOk=false, saveErr='';
-  try{
-    const r=await fetch('/api/clients',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({nome:'__TEST__',cognome:'__DIAG__',eui:'TEST'})});
-    const j=await r.json();
-    if(j.ok){
-      saveOk=true;
-      // Remove test entry
-      const clients=await(await fetch('/api/clients')).json();
-      const idx=clients.findIndex(c=>c.nome==='__TEST__');
-      if(idx>=0) await fetch('/api/clients/'+idx,{method:'DELETE'});
-    } else saveErr=j.error||'risposta non ok';
-  }catch(e){ saveErr=e.message; }
-  if(saveOk){
-    bar.style.background='#F0FBF6'; bar.style.borderColor='#1DB584'; bar.style.color='#0F5132';
-    msg.innerHTML='✅ SERVER OK — Build: '+status.build+
-      ' — File: '+status.data_file+' — Clienti: '+status.clients;
-  } else {
-    bar.style.background='#FEF2F2'; bar.style.borderColor='#D94F4F'; bar.style.color='#B91C1C';
-    msg.innerHTML='❌ SALVATAGGIO FALLITO: '+saveErr;
+    msg.innerHTML='Server non raggiungibile: '+e.message;
   }
 }
 runDiag();
@@ -1610,6 +1593,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", "mm_sess=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
             self.end_headers(); return
 
+        # ── /api/status is public (used by runDiag before auth check) ──
+        if path == "/api/status":
+            writable=False
+            try:
+                with open(DATA,"a"): pass
+                writable=True
+            except: pass
+            self.send_json({"ok":True,"data_file":DATA,"writable":writable,
+                "clients":len(load_clients()),"build":BUILD_TS})
+            return
+
         # ── Auth required for all other routes ──
         sess = self._get_sess()
         if sess is None:
@@ -1632,14 +1626,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body,status=call_api(qs.get("path",["/device/"])[0])
             self.send_response(status); self.send_header("Content-Type","application/json")
             self.send_header("Access-Control-Allow-Origin","*"); self.end_headers(); self.wfile.write(body)
-        elif path=="/api/status":
-            writable=False
-            try:
-                with open(DATA,"a"): pass
-                writable=True
-            except: pass
-            self.send_json({"ok":True,"data_file":DATA,"writable":writable,
-                "clients":len(load_clients()),"build":BUILD_TS})
         elif path=="/api/clients": self.send_json(load_clients())
         elif path=="/api/alerts":
             try:
