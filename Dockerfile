@@ -5,13 +5,12 @@ WORKDIR /app
 COPY trackpac_server.py .
 COPY sensori.txt .
 
-# Set these in Dokploy > Environment Variables:
-# TRACKPAC_API_KEY, SMTP_USER, SMTP_PASS
-# TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER
-# ADMIN_USER, ADMIN_PASS, DATA_DIR=/app, PORT=3000
+# Crea la cartella /app/data con permessi di scrittura
+RUN mkdir -p /app/data && chmod 777 /app/data
 
 ENV PORT=3000
 ENV PYTHONUNBUFFERED=1
+ENV DATA_DIR=/app/data
 
 EXPOSE 3000
 
