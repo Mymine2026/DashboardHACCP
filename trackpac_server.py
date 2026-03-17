@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 14:06:10'
+BUILD_TS    = '2026-03-17 14:17:39'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1693,35 +1693,33 @@ async function importClienti(input){
 }
 function esportaXls(e){
   e.preventDefault();
-  fetch('/api/clients').then(r=>r.json()).then(cls=>{
+  fetch('/api/clients').then(function(r){return r.json();}).then(function(cls){
     if(!cls.length){alert('Nessun cliente da esportare.');return;}
-    // Build CSV-like TSV that Excel opens natively
-    const COLS=['Cognome','Nome','Ragione Sociale','P.IVA','Email','Telefono',
-                'Indirizzo','CAP','Citta','Provincia','Resp. HACCP',
-                'Sensori (EUI)','Sensori (Nome)','Notif. Email','Notif. SMS',
-                'Username'];
-    const rows=[COLS];
-    cls.forEach(c=>{
-      const euiList=(c.sensori||[{eui:c.eui||'',nome_frigo:''}]).map(s=>s.eui||'').join(', ');
-      const nomeList=(c.sensori||[{eui:'',nome_frigo:c.nome_frigo||''}]).map(s=>s.nome_frigo||s.eui||'').join(', ');
-      rows.push([
-        c.cognome||'',c.nome||'',c.rag_soc||'',c.piva||'',c.email||'',
-        c.telefono||'',c.indirizzo||'',c.cap||'',c.citta||'',c.provincia||'',
-        c.resp_haccp||'',euiList,nomeList,
-        c.notif_email?'Si':'No',c.notif_sms?'Si':'No',
-        c.username||c.email||''
-      ]);
+    var SEP=String.fromCharCode(13,10);
+    var Q=String.fromCharCode(34);
+    var COLS=['Cognome','Nome','Ragione Sociale','P.IVA','Email','Telefono',
+              'Indirizzo','CAP','Citta','Provincia','Resp. HACCP',
+              'Sensori EUI','Sensori Nome','Notif Email','Notif SMS','Username'];
+    var rows=[COLS.map(function(c){return Q+c+Q;}).join(';')];
+    cls.forEach(function(c){
+      var euiList=(c.sensori||[{eui:c.eui||''} ]).map(function(s){return s.eui||''}).join(', ');
+      var nomeList=(c.sensori||[{nome_frigo:''}]).map(function(s){return s.nome_frigo||s.eui||''}).join(', ');
+      var vals=[c.cognome||''  ,c.nome||''    ,c.rag_soc||''  ,c.piva||''    ,c.email||''    ,
+                c.telefono||''  ,c.indirizzo||''  ,c.cap||''  ,c.citta||''  ,c.provincia||''  ,
+                c.resp_haccp||''  ,euiList  ,nomeList  ,
+                c.notif_email?'Si':'No'  ,c.notif_sms?'Si':'No'  ,c.username||c.email||''  ];
+      rows.push(vals.map(function(v){var s=String(v).replace(/;/g,' ');return Q+s+Q;}).join(';'));
     });
-    // BOM + CSV (semicolon for Italian Excel)
-    const csv='\uFEFF'+rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
+    var csv=String.fromCharCode(0xEF,0xBB,0xBF)+rows.join(SEP);
+    var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
     a.href=url; a.download='mymine_clienti.csv';
     document.body.appendChild(a); a.click();
     document.body.removeChild(a); URL.revokeObjectURL(url);
-  }).catch(e=>alert('Errore export: '+e.message));
+  }).catch(function(e){alert('Errore export: '+e.message);});
 }
+
 async function checkNow(){
   const b=document.getElementById('btnCheck');
   b.disabled=true; b.textContent='⏳ Controllo in corso...';
