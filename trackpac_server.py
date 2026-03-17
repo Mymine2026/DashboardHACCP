@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 09:33:27'
+BUILD_TS    = '2026-03-17 11:27:24'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1413,35 +1413,43 @@ def send_sms(to_number, message):
     try:
         phone = _normalize_phone(to_number)
         body  = _ascii_sms(message)
-        url   = "https://api.smsapi.com/sms.do"
-        data  = _uparse.urlencode({
+        params = {
             "to":      phone,
-            "from":    SMSAPI_SENDER,
             "message": body,
             "format":  "json"
-        }).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={
-            "Authorization": f"Bearer {SMSAPI_TOKEN}",
-            "Content-Type":  "application/x-www-form-urlencoded"
-        })
+        }
+        # Usa sender solo se configurato, altrimenti SMSAPI usa il default "Test"
+        if SMSAPI_SENDER:
+            params["from"] = SMSAPI_SENDER
+        data = _uparse.urlencode(params).encode("utf-8")
+        req  = urllib.request.Request(
+            "https://api.smsapi.com/sms.do", data=data,
+            headers={"Authorization": f"Bearer {SMSAPI_TOKEN}",
+                     "Content-Type":  "application/x-www-form-urlencoded"})
         with urllib.request.urlopen(req, timeout=20) as r:
             resp = json.loads(r.read())
-        # SMSAPI response: {"count":1,"list":[{"id":"...","status":"QUEUE","number":"..."}]}
+        print(f"  [SMS] Risposta SMSAPI: {resp}")
+        # Controlla errori nella risposta
+        if isinstance(resp.get("error"), dict):
+            code = resp["error"].get("code","?")
+            msg  = resp["error"].get("message","?")
+            print(f"  [SMS] Errore SMSAPI {code}: {msg}")
+            if code == 14:
+                print(f"  [SMS] HINT: sender '{SMSAPI_SENDER}' non approvato — imposta SMSAPI_SENDER vuoto per usare 'Test'")
+            return False
         if resp.get("invalid_numbers"):
             print(f"  [SMS] Numero non valido: {phone}")
             return False
-        lst = resp.get("list", [{}])
-        sid = lst[0].get("id","?"); status = lst[0].get("status","?")
+        lst    = resp.get("list", [{}])
+        sid    = lst[0].get("id","?") if lst else "?"
+        status = lst[0].get("status","?") if lst else "?"
         print(f"  [SMS] OK to={phone} id={sid} status={status}")
         return True
     except urllib.error.HTTPError as e:
         bd = e.read().decode()
-        try:
-            err = json.loads(bd)
-            code = err.get("code","?"); msg = err.get("message", bd[:200])
-            print(f"  [SMS] SMSAPI error {code}: {msg}")
-        except:
-            print(f"  [SMS] HTTP {e.code}: {bd[:200]}")
+        print(f"  [SMS] HTTP {e.code}: {bd[:300]}")
+        if e.code == 401:
+            print(f"  [SMS] Token non valido — rigenera il token su smsapi.com > OAuth Tokens")
         return False
     except Exception as e:
         print(f"  [SMS] errore: {e}")
@@ -1864,9 +1872,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not SMSAPI_TOKEN:
                     result["sms"] = {"ok": False, "error": "SMSAPI_TOKEN non configurato"}
                 else:
-                    ok = send_sms(to_phone, "Test allarme MyMine - se ricevi questo messaggio gli SMS funzionano.")
-                    result["sms"] = {"ok": ok, "to": to_phone}
-                    if ok: print(f"  [TEST] ✓ SMS inviato a {to_phone}")
+                    try:
+                        phone_n = _normalize_phone(to_phone)
+                        body_t  = _ascii_sms("Test allarme MyMine - se ricevi questo messaggio gli SMS funzionano.")
+                        url_t   = "https://api.smsapi.com/sms.do"
+                        data_t  = _uparse.urlencode({
+                            "to": phone_n, "from": SMSAPI_SENDER,
+                            "message": body_t, "format": "json"
+                        }).encode("utf-8")
+                        req_t = urllib.request.Request(url_t, data=data_t, headers={
+                            "Authorization": f"Bearer {SMSAPI_TOKEN}",
+                            "Content-Type": "application/x-www-form-urlencoded"
+                        })
+                        with urllib.request.urlopen(req_t, timeout=20) as r_t:
+                            resp_t = json.loads(r_t.read())
+                        if resp_t.get("invalid_numbers"):
+                            result["sms"] = {"ok": False, "error": f"Numero non valido: {phone_n}", "raw": str(resp_t)}
+                        elif resp_t.get("error"):
+                            ec = resp_t["error"].get("code","?"); em = resp_t["error"].get("message","?")
+                            result["sms"] = {"ok": False, "error": f"SMSAPI error {ec}: {em}"}
+                        else:
+                            lst_t = resp_t.get("list",[{}])
+                            result["sms"] = {"ok": True, "to": phone_n,
+                                "id": lst_t[0].get("id","?"), "status": lst_t[0].get("status","?")}
+                            print(f"  [TEST] ✓ SMS inviato a {phone_n}")
+                    except urllib.error.HTTPError as e_t:
+                        bd_t = e_t.read().decode()
+                        result["sms"] = {"ok": False, "error": f"HTTP {e_t.code}: {bd_t[:200]}"}
+                    except Exception as e_t:
+                        result["sms"] = {"ok": False, "error": str(e_t)}
             # Config summary
             result["details"] = {
                 "smtp_user":     SMTP_USER or "(vuoto)",

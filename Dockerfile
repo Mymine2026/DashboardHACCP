@@ -5,7 +5,6 @@ WORKDIR /app
 COPY trackpac_server.py .
 COPY sensori.txt .
 
-# Crea la cartella /app/data con permessi di scrittura
 RUN mkdir -p /app/data && chmod 777 /app/data
 
 ENV PORT=3000
