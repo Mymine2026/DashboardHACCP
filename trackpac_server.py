@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 12:35:32'
+BUILD_TS    = '2026-03-17 13:09:19'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -333,241 +333,265 @@ def build_xlsx(sheet_rows,col_widths):
         zf.writestr("xl/worksheets/sheet1.xml",sheet)
     buf.seek(0);return buf.read()
 
-def generate_pdf_report(client):
-    """Genera PDF report con le misurazioni orarie del giorno precedente."""
+def _fetch_frames(dev_id, date_obj):
+    """Fetch frames for a given date. Returns sorted list of parsed rows."""
+    ds = date_obj.strftime("%Y-%m-%d")
+    body, code = call_api(f"/frame/{dev_id}/{ds}T00:00:00/{ds}T23:59:59")
+    if code != 200:
+        body, code = call_api(f"/frame/days/{dev_id}/2")
+    frames_raw = json.loads(body)
+    if isinstance(frames_raw, dict):
+        frames_raw = frames_raw.get("frames") or frames_raw.get("data") or frames_raw.get("items") or []
+    rows = []
+    for f in frames_raw:
+        try:
+            ts_str = f.get("time_created") or f.get("time") or f.get("created_at","")
+            ts = datetime.fromisoformat(ts_str.replace("Z","+00:00")).astimezone()
+            p = _get_payload(f)
+            T = _get_val(p,"temperature","temp")
+            H = _get_val(p,"humidity","hum")
+            rows.append({"ts": ts, "T": T, "H": H})
+        except: pass
+    rows.sort(key=lambda r: r["ts"])
+    return rows
+
+def _rows_ogni_4h(rows, target_date, sensore_nome):
+    """Campiona una misurazione ogni 4 ore (00,04,08,12,16,20) dalla lista raw."""
+    MESI_IT = ["","Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
+               "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
+    slots = [0, 4, 8, 12, 16, 20]
+    result = []
+    for slot in slots:
+        # Prendi la misurazione più vicina all'ora slot
+        candidates = [r for r in rows
+                      if r["ts"].date() == target_date and abs(r["ts"].hour - slot) <= 2]
+        if candidates:
+            best = min(candidates, key=lambda r: abs(r["ts"].hour - slot))
+            result.append({
+                "giorno": target_date.strftime("%d/%m/%Y"),
+                "ora":    best["ts"].strftime("%H:%M"),
+                "sensore": sensore_nome,
+                "T":      best.get("T"),
+                "H":      best.get("H"),
+            })
+        else:
+            result.append({
+                "giorno": target_date.strftime("%d/%m/%Y"),
+                "ora":    f"{slot:02d}:00",
+                "sensore": sensore_nome,
+                "T": None, "H": None,
+            })
+    return result
+
+def generate_pdf_report(client, tipo="giornaliero"):
+    """
+    Genera PDF HACCP.
+    tipo='giornaliero': misurazioni di ieri ogni 4 ore (inviato alle 09:00)
+    tipo='mensile': misurazioni del mese scorso ogni 4 ore (inviato il 1° del mese)
+    """
     try:
         body, code = call_api("/device/")
         if code != 200: return None, f"API error {code}"
         devs = json.loads(body)
-        _si  = client.get("_sensor_idx", 0)
-        _s   = get_client_sensor(client, _si)
-        _eui = _s.get("eui", "")
-        dev  = next((d for d in devs if (d.get("dev_eui","")).upper() == _eui.upper()), None)
-        if not dev: return None, "Device non trovato"
-        dev_id = dev["id"]
-        yday = datetime.now(timezone.utc) - timedelta(days=1)
-        body, code = call_api(f"/frame/{dev_id}/{yday.strftime('%Y-%m-%dT00:00:00')}/{yday.strftime('%Y-%m-%dT23:59:59')}")
-        if code != 200:
-            body, code = call_api(f"/frame/days/{dev_id}/2")
-        frames_raw = json.loads(body)
-        if isinstance(frames_raw, dict):
-            frames_raw = frames_raw.get("frames") or frames_raw.get("data") or frames_raw.get("items") or []
-        # Parse and sort frames
-        rows = []
-        for f in frames_raw:
-            try:
-                ts_str = f.get("time_created") or f.get("time") or f.get("created_at","")
-                ts = datetime.fromisoformat(ts_str.replace("Z","+00:00")).astimezone()
-                p = _get_payload(f)
-                T = _get_val(p, "temperature","temp")
-                H = _get_val(p, "humidity","hum")
-                B = _get_val(p, "battery_pct","battery","bat")
-                rows.append({"ts": ts, "T": T, "H": H, "B": B})
-            except: pass
-        rows.sort(key=lambda r: r["ts"])
-        # Bucket into 24 hourly slots for yesterday
-        yday_local = (datetime.now() - timedelta(days=1)).date()
-        hourly = {}
-        for r in rows:
-            h = r["ts"].hour
-            if r["ts"].date() == yday_local:
-                if h not in hourly:
-                    hourly[h] = []
-                hourly[h].append(r)
-        # Average per hour
-        hour_rows = []
-        for h in range(24):
-        	if h in hourly:
-        		vals = hourly[h]
-        		T_avg = sum(r["T"] for r in vals if r["T"] is not None) / max(1, sum(1 for r in vals if r["T"] is not None)) if any(r["T"] is not None for r in vals) else None
-        		H_avg = sum(r["H"] for r in vals if r["H"] is not None) / max(1, sum(1 for r in vals if r["H"] is not None)) if any(r["H"] is not None for r in vals) else None
-        		hour_rows.append((h, T_avg, H_avg))
-        	else:
-        		hour_rows.append((h, None, None))
-        # All rows for summary
-        all_T = [r["T"] for r in rows if r["T"] is not None]
-        all_H = [r["H"] for r in rows if r["H"] is not None]
-        nome = (client.get("cognome","") + " " + client.get("nome","")).strip()
-        date_str = yday_local.strftime("%d/%m/%Y")
-        pdf = _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, rows)
-        return pdf, None
+        MESI_IT = ["","Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
+                   "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
+        pdfs = []  # un PDF per ogni sensore
+        for _si_idx, _s in enumerate(client.get("sensori", [{"eui": client.get("eui","")}])):
+            _eui = _s.get("eui","").upper()
+            dev = next((d for d in devs if (d.get("dev_eui","")).upper() == _eui), None)
+            if not dev: continue
+            dev_id = dev["id"]
+            nome   = (client.get("cognome","") + " " + client.get("nome","")).strip()
+            sname  = _s.get("nome_frigo", _eui[-6:])
+
+            if tipo == "giornaliero":
+                yday = (datetime.now() - timedelta(days=1)).date()
+                rows = _fetch_frames(dev_id, yday)
+                rows_4h = _rows_ogni_4h(rows, yday, sname)
+                mese_anno = MESI_IT[yday.month] + " " + str(yday.year)
+            else:  # mensile
+                first_today = datetime.now().date().replace(day=1)
+                last_month_end = first_today - timedelta(days=1)
+                last_month_start = last_month_end.replace(day=1)
+                rows_4h = []
+                d = last_month_start
+                while d <= last_month_end:
+                    day_rows = _fetch_frames(dev_id, d)
+                    rows_4h.extend(_rows_ogni_4h(day_rows, d, sname))
+                    d += timedelta(days=1)
+                mese_anno = MESI_IT[last_month_end.month] + " " + str(last_month_end.year)
+
+            pdf = _build_pdf(nome, client, mese_anno, rows_4h, mese_anno, tipo)
+            pdfs.append((pdf, sname))
+
+        if not pdfs: return None, "Nessun sensore trovato"
+        return pdfs[0][0], None  # per compatibilità ritorna il primo
     except Exception as e:
         import traceback
         print(f"  [PDF] errore: {e}\n{traceback.format_exc()}")
         return None, str(e)
 
-def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
-    """Genera PDF report misurazioni — layout A4, tabella 24 ore."""
+def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
+    """
+    Genera PDF Registro HACCP.
+    rows_4h: lista di dict {ora: "HH:MM", sensore: str, T: float|None, H: float|None}
+    mese_anno: stringa es. "Marzo 2026"
+    tipo: "giornaliero" o "mensile"
+    """
     def esc(s):
-        # Encode for PDF string literals: escape \, (, )
-        s = str(s).replace('\\','\\\\').replace('(','\\(').replace(')','\\)')
-        return s.encode('latin-1', errors='replace').decode('latin-1')
+        s = str(s).replace("\\","\\\\").replace("(","\\(").replace(")","\\)")
+        return s.encode("latin-1", errors="replace").decode("latin-1")
     def fmt(v, d=1):
-        return f"{v:.{d}f}" if v is not None else "--"
+        return f"{v:.{d}f}" if v is not None else ""
 
-    # ── Page geometry ─────────────────────────────────────
-    W, H   = 595, 842           # A4 points
-    ML, MR = 45, 45             # left / right margin
-    ROW_H  = 19                 # table row height (pt)
+    W, H   = 595, 842    # A4
+    ML, MR = 30, 30
+    MT     = 820         # top y
+    C_BLK  = "0 0 0"
+    C_GRY  = "0.5 0.5 0.5"
+    C_LGR  = "0.85 0.85 0.85"
+    C_VLG  = "0.95 0.95 0.95"
+    C_RED  = "0.8 0 0"
 
-    # ── Column positions (x start of each column) ─────────
-    # Ora | Temperatura | Umidita  (3 colonne)
-    COL_X = [ML + 6, ML + 110, ML + 320]   # left edge of text
-    COL_W = [       98,        200,         207]      # width
-
-    # ── Color helpers ─────────────────────────────────────
-    C_DARKBG = "0.122 0.302 0.251"   # #1F4E3D
-    C_GREEN  = "0.114 0.710 0.518"   # #1DB584
-    C_TEXT   = "0.102 0.239 0.188"   # #1A3D30
-    C_SUB    = "0.306 0.451 0.400"   # #4E7367
-    C_RED    = "0.851 0.310 0.310"   # #D94F4F
-    C_BLUE   = "0.157 0.471 0.690"   # #2878B0
-    C_LIGHT  = "0.945 0.961 0.949"   # very light green-grey
-    C_LINE   = "0.808 0.918 0.855"   # #CEEADB
-    C_ALARM  = "1.000 0.940 0.940"   # light red for alarm rows
-
-    # ── Helpers ───────────────────────────────────────────
     ops = []
-    def g(s):  ops.append(s)
+    def g(s): ops.append(s)
+
     def rect(x, y, w, h, color, fill=True):
-        g(f"{color} rg")
+        g(f"{color} {'rg' if fill else 'RG'}")
         g(f"{x:.1f} {y:.1f} {w:.1f} {h:.1f} re {'f' if fill else 'S'}")
-    def txt(x, y, font, size, color, text):
-        g(f"{color} rg")
-        g(f"BT /{font} {size} Tf {x:.1f} {y:.1f} Td ({esc(text)}) Tj ET")
 
-    # ══════════════════════════════════════════════════════
-    # HEADER  (logo su sfondo bianco, nessuna banda)
-    # ══════════════════════════════════════════════════════
-    # Thin green top accent line
-    rect(ML, H-20, W-ML-MR, 4, C_GREEN)
-    # Logo: scale to 42pt height, maintain aspect 97x65
-    _lw, _lh = 97, 65
-    _ph = 42; _pw = int(_lw * _ph / _lh)   # ~63pt wide
-    _px = ML; _py = H - 72
-    g(f"q {_pw} 0 0 {_ph} {_px} {_py} cm /Im1 Do Q")
-    # Title text to the right of logo
-    txt(ML + _pw + 12, H-38, "F2", 13, C_DARKBG, "REPORT MISURAZIONI HACCP")
-    txt(ML + _pw + 12, H-52, "F1", 9,  C_SUB,    f"Data: {date_str}")
-    txt(ML + _pw + 12, H-63, "F1", 8,  C_SUB,    f"Cliente: {nome}")
-    # Separator line below header
-    rect(ML, H-78, W-ML-MR, 0.8, C_LINE)
+    def line(x1, y1, x2, y2, width=0.5, color="0 0 0"):
+        g(f"{width} w {color} RG")
+        g(f"{x1:.1f} {y1:.1f} m {x2:.1f} {y2:.1f} l S")
 
-    # ══════════════════════════════════════════════════════
-    # CLIENT INFO BOX  (compact, below header)
-    # ══════════════════════════════════════════════════════
-    y = H - 92
-    rect(ML, y-34, W-ML-MR, 38, C_LIGHT)
-    txt(ML+10, y-10, "F2", 10, C_TEXT, f"EUI: {client.get('eui','')}")
-    txt(ML+10, y-23, "F1", 8,  C_SUB,  client.get('indirizzo',''))
-    txt(W-MR-220, y-10, "F1", 8, C_SUB, f"Email: {client.get('email','')}")
-    txt(W-MR-220, y-23, "F1", 8, C_SUB, f"Tel: {client.get('telefono','')}")
+    def txt(x, y, font, size, color, text, align="left"):
+        if align == "center":
+            # approximate centering
+            g(f"BT /{font} {size} Tf")
+            g(f"{color} rg")
+            g(f"{x:.1f} {y:.1f} Td ({esc(text)}) Tj ET")
+        else:
+            g(f"BT /{font} {size} Tf {color} rg {x:.1f} {y:.1f} Td ({esc(text)}) Tj ET")
 
-    # ══════════════════════════════════════════════════════
-    # SUMMARY STATS (3 boxes)
-    # ══════════════════════════════════════════════════════
-    y -= 58
-    t_min_v = min(all_T) if all_T else None
-    t_max_v = max(all_T) if all_T else None
-    t_avg_v = (sum(all_T)/len(all_T)) if all_T else None
-    h_min_v = min(all_H) if all_H else None
-    h_max_v = max(all_H) if all_H else None
-    h_avg_v = (sum(all_H)/len(all_H)) if all_H else None
-    n_ore   = sum(1 for _, T, _ in hour_rows if T is not None)
+    def hrule(y, lw=0.5):
+        line(ML, y, W-MR, y, lw)
 
-    # Battery: last available reading from raw_rows
-    all_B = [r["B"] for r in raw_rows if r.get("B") is not None]
-    last_B = all_B[-1] if all_B else None
-    is_volt = last_B is not None and last_B < 10
-    b_label = f"{last_B:.2f} V" if (last_B is not None and is_volt) else (f"{last_B:.0f} %" if last_B is not None else "--")
-    b_min   = f"Min: {min(all_B):.2f}{'V' if is_volt else '%'}" if all_B else "Min: --"
-    b_max   = f"Max: {max(all_B):.2f}{'V' if is_volt else '%'}" if all_B else "Max: --"
+    # ─── TITOLO ──────────────────────────────────────────
+    y = MT - 10
+    txt(ML, y, "F2", 14, C_BLK, "REGISTRO CONTROLLO TEMPERATURE FRIGORIFERI")
+    y -= 16
+    txt(ML, y, "F1", 10, C_GRY, "Sistema HACCP - Conformita D.Lgs. 193/2007")
+    y -= 8
+    hrule(y, 1.5)
 
-    box_w = (W - ML - MR - 12) // 3   # ~163 pt each
-    for i, (title, bar_col, lines_txt) in enumerate([
-        ("Temperatura", C_RED,
-         [f"Min: {fmt(t_min_v)} grC", f"Max: {fmt(t_max_v)} grC", f"Media: {fmt(t_avg_v)} grC"]),
-        ("Umidita relativa", C_BLUE,
-         [f"Min: {fmt(h_min_v,0)} %", f"Max: {fmt(h_max_v,0)} %", f"Media: {fmt(h_avg_v,0)} %"]),
-        ("Batteria sensore", C_GREEN,
-         [f"Ultimo: {b_label}", b_min, b_max]),
-    ]):
-        bx = ML + i * (box_w + 6)
-        rect(bx, y-58, box_w, 58, C_LINE)
-        rect(bx, y-3,  box_w, 3,  bar_col)
-        txt(bx+8, y-14, "F2", 8, C_TEXT, title)
-        for j, ln in enumerate(lines_txt):
-            txt(bx+8, y-27-j*11, "F1", 8, C_SUB, ln)
+    # ─── DATI ANAGRAFICI ─────────────────────────────────
+    y -= 14
+    bh = 52
+    rect(ML, y-bh, W-ML-MR, bh, C_VLG)
+    rect(ML, y-bh, W-ML-MR, bh, C_BLK, False)
+    txt(ML+5, y-13,  "F2", 9, C_BLK, "DATI OPERATORE / AZIENDA")
+    rag_soc = nome
+    addr    = client.get("indirizzo","")
+    city    = " ".join(filter(None, [client.get("cap",""), client.get("citta",""), client.get("provincia","")]))
+    piva    = client.get("piva","")
+    tel     = client.get("telefono","")
+    txt(ML+5, y-26,  "F1", 9, C_BLK, f"Ragione Sociale: {rag_soc}")
+    txt(ML+5, y-38,  "F1", 9, C_BLK, f"Indirizzo: {addr}{('  -  ' + city) if city else ''}")
+    txt(ML+5, y-50,  "F1", 9, C_BLK, f"P.IVA: {piva}   Tel: {tel}")
 
-    # ══════════════════════════════════════════════════════
-    # TABLE HEADER
-    # ══════════════════════════════════════════════════════
-    y -= 74
-    rect(ML, y-ROW_H, W-ML-MR, ROW_H, C_DARKBG)
-    for ci, (label, cx) in enumerate(zip(
-            ["Ora", "Temperatura (grC)", "Umidita (%)"], COL_X)):
-        txt(cx, y-13, "F2", 8, "1 1 1", label)
+    # ─── MESE/ANNO ───────────────────────────────────────
+    y -= bh + 10
+    txt((W//2)-60, y, "F2", 18, C_BLK, mese_anno)
+    y -= 6
+    hrule(y, 0.8)
 
-    # Column separator lines in header
-    g(f"0.3 0.55 0.45 rg")
-    for cx in COL_X[1:]:
-        g(f"{cx-4:.1f} {y-ROW_H:.1f} 0.5 {ROW_H:.1f} re f")
+    # ─── BOX TEMPERATURE DI RIFERIMENTO ──────────────────
+    y -= 12
+    bref = 28
+    rect(ML, y-bref, W-ML-MR, bref, "0.9 0.95 1.0")
+    rect(ML, y-bref, W-ML-MR, bref, C_BLK, False)
+    txt(ML+5, y-12, "F2", 8, C_BLK, "TEMPERATURE DI RIFERIMENTO:")
+    ref_line = ("Prodotti Freschi: 0 grC / +4 grC   |   "
+                "Prodotti Surgelati: -18 grC (+-3 grC)   |   "
+                "Prodotti Congelati: -12 grC")
+    txt(ML+5, y-24, "F1", 8, "0.1 0.1 0.5", ref_line)
 
-    # ══════════════════════════════════════════════════════
-    # TABLE ROWS  (24 righe orarie)
-    # ══════════════════════════════════════════════════════
-    t_min_th = client.get("t_min")
-    t_max_th = client.get("t_max")
-    h_min_th = client.get("h_min")
-    h_max_th = client.get("h_max")
+    # ─── INTESTAZIONE TABELLA ────────────────────────────
+    y -= bref + 8
+    ROW_H  = 16
+    # Colonne: Giorno | Ora | Sensore | Temperatura | Umidita | Note/Anomalie | Azioni correttive
+    CW = [38, 32, 65, 55, 42, 120, 120]  # larghezze
+    LABELS = ["Giorno","Ora","Sensore","Temp. (grC)","Umid. (%)","Note / Anomalie","Azioni Correttive"]
+    cx = ML
+    rect(ML, y-ROW_H, W-ML-MR, ROW_H, C_LGR)
+    rect(ML, y-ROW_H, W-ML-MR, ROW_H, C_BLK, False)
+    for i,(lbl,cw) in enumerate(zip(LABELS, CW)):
+        txt(cx+2, y-12, "F2", 7, C_BLK, lbl)
+        if i < len(CW)-1:
+            line(cx+cw, y, cx+cw, y-ROW_H, 0.3)
+        cx += cw
 
-    for row_i, (hour, T_val, H_val) in enumerate(hour_rows):
+    # ─── RIGHE DATI ──────────────────────────────────────
+    for ri, row in enumerate(rows_4h):
         y -= ROW_H
-        if y < 55:
-            break   # Safety: won't happen for 24 rows on A4
+        if y < 90:
+            break
+        bg = C_VLG if ri % 2 == 0 else "1 1 1"
+        # Evidenzia allarmi
+        T_val = row.get("T")
+        _si_obj = row.get("_sens", {})
+        t_min = _si_obj.get("t_min") if isinstance(_si_obj, dict) else None
+        t_max = _si_obj.get("t_max") if isinstance(_si_obj, dict) else None
+        alarm = (T_val is not None and (
+            (t_min is not None and T_val < t_min) or
+            (t_max is not None and T_val > t_max)))
+        if alarm: bg = "1 0.85 0.85"
+        rect(ML, y-ROW_H+1, W-ML-MR, ROW_H-1, bg)
+        # border
+        line(ML, y-ROW_H+1, W-MR, y-ROW_H+1, 0.2, C_LGR)
 
-        # Row background
-        alarm_t = (T_val is not None and (
-            (t_min_th is not None and T_val < t_min_th) or
-            (t_max_th is not None and T_val > t_max_th)))
-        alarm_h = (H_val is not None and (
-            (h_min_th is not None and H_val < h_min_th) or
-            (h_max_th is not None and H_val > h_max_th)))
-        if alarm_t or alarm_h:
-            rect(ML, y-ROW_H+1, W-ML-MR, ROW_H-1, C_ALARM)
-        elif row_i % 2 == 0:
-            rect(ML, y-ROW_H+1, W-ML-MR, ROW_H-1, C_LIGHT)
+        vals = [
+            row.get("giorno",""),
+            row.get("ora",""),
+            row.get("sensore",""),
+            fmt(T_val) if T_val is not None else "",
+            fmt(row.get("H"),0) if row.get("H") is not None else "",
+            "",  # Note (vuoto, compilato a mano)
+            "",  # Azioni (vuoto, compilato a mano)
+        ]
+        cx = ML
+        for i,(v,cw) in enumerate(zip(vals, CW)):
+            col = C_RED if (alarm and i==3) else C_BLK
+            txt(cx+2, y-12, "F1", 8, col, v)
+            if i < len(CW)-1:
+                line(cx+cw, y, cx+cw, y-ROW_H+1, 0.2, C_GRY)
+            cx += cw
 
-        # Row data
-        hour_str = f"{hour:02d}:00 - {hour:02d}:59"
-        T_str    = (fmt(T_val) + " grC") if T_val is not None else "--"
-        H_str    = (fmt(H_val, 0) + " %") if H_val is not None else "--"
+    # ─── FOOTER FIRME ────────────────────────────────────
+    fy = 75
+    hrule(fy+2, 0.8)
+    # Sinistra
+    txt(ML, fy-8,  "F1", 8, C_BLK, "Data compilazione: ___/___/_______")
+    txt(ML, fy-22, "F1", 8, C_BLK, "Firma Responsabile HACCP: _________________________")
+    # Destra
+    rx = W//2 + 10
+    txt(rx, fy-8,  "F1", 8, C_BLK, "Data controllo ASL: ___/___/_______")
+    txt(rx, fy-22, "F1", 8, C_BLK, "Firma Ispettore ASL: _________________________")
 
-        cell_txt = [hour_str, T_str, H_str]
-        cell_col = [C_TEXT, C_RED if alarm_t else C_TEXT,
-                    C_BLUE if alarm_h else C_TEXT]
+    # ─── NOTA IMPORTANTE ─────────────────────────────────
+    hrule(fy-30, 0.5)
+    nota = ("NOTA IMPORTANTE: Questo registro deve essere conservato per almeno 12 mesi dalla data di compilazione. "
+            "In caso di temperature fuori norma, annotare immediatamente le azioni correttive e informare il Responsabile HACCP.")
+    txt(ML, fy-42, "F1", 7, C_GRY, nota)
 
-        for ci, (v, cx, cc) in enumerate(zip(cell_txt, COL_X, cell_col)):
-            txt(cx, y-13, "F1", 9, cc, v)
+    # ─── PIEDE PAGINA ────────────────────────────────────
+    txt(ML,      fy-55, "F1", 6, C_GRY, "MyMine Srl  -  P.IVA IT12038850967  -  info@mymine.io  -  Sistema HACCP IoT")
+    txt(W-MR-40, fy-55, "F1", 6, C_GRY, "Pag. 1/1")
 
-        # Thin row separator
-        g(f"{C_LINE} rg")
-        g(f"{ML:.1f} {y-ROW_H+1:.1f} {W-ML-MR:.1f} 0.4 re f")
-
-    # ══════════════════════════════════════════════════════
-    # FOOTER
-    # ══════════════════════════════════════════════════════
-    rect(ML, 20, W-ML-MR, 0.5, C_LINE)
-    txt(ML,       24, "F1", 7, C_SUB, "MyMine Srl  -  P.IVA IT12038850967  -  info@mymine.io")
-    txt(W-MR-50,  24, "F1", 7, C_SUB, "Pag. 1 / 1")
-
-    # ══════════════════════════════════════════════════════
-    # ASSEMBLE PDF BINARY
-    # ══════════════════════════════════════════════════════
+    # ─── ASSEMBLE PDF ────────────────────────────────────
     stream_str   = "\n".join(ops)
     stream_bytes = stream_str.encode("latin-1", errors="replace")
 
-    # PDF objects
     objs = []
     def obj(n, header, payload=None):
         objs.append((n, header, payload))
@@ -575,22 +599,13 @@ def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
     obj(1, "<< /Type /Catalog /Pages 2 0 R >>")
     obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
     obj(3, (f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {W} {H}] "
-            f"/Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> "
-            f"/XObject << /Im1 7 0 R >> >> >>"))
+            f"/Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>"))
     obj(4, f"<< /Length {len(stream_bytes)} >>", stream_bytes)
     obj(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     obj(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
-    # Embed pre-decoded raw RGB logo (no runtime PNG parsing needed)
-    import base64 as _b64i, zlib as _zlibpdf
-    _raw_rgb = _b64i.b64decode(LOGO_RAW_RGB_B64)
-    _img_stream = _zlibpdf.compress(_raw_rgb, 6)
-    obj(7, (f"<< /Type /XObject /Subtype /Image /Width {LOGO_W} /Height {LOGO_H} "
-            f"/ColorSpace /DeviceRGB /BitsPerComponent 8 "
-            f"/Filter /FlateDecode /Length {len(_img_stream)} >>"), _img_stream)
 
-    buf     = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"   # header + binary comment
+    buf     = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
     offsets = {}
-
     for num, header, payload in objs:
         offsets[num] = len(buf)
         buf += f"{num} 0 obj\n{header}\n".encode()
@@ -608,10 +623,503 @@ def _build_pdf(nome, client, date_str, hour_rows, all_T, all_H, raw_rows):
     return bytes(buf)
 
 
-HACCP_LOGO_B64 = "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"
-LOGO_RAW_RGB_B64 = "/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////v/9///8//38//39/v7+/v3///7//P3/+v7+/vv+//z9///8/v/8///8///+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8//3+///7//7+/v39///5/f39///7/v3+//7+//78/v37//7+/vz+/////////////////////////////v7//v7+/////v/7/v39//77//79//3+//79//7//v3+/////v7////+///8///8///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////+/v/8//7///z//v7//v/88/zn6PLQ7fjf+//3/v76/vz9//7//v////7///7////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////6//79///5///9/Pv59/jv/v769/nx///+9/f0+/z2+/v1+fr1/v/69/f0/////v7+/////////////////v7//fz89/j1/v/89vfw/P35+/r2/Pv4/P769/r2/f769vj1/v/8///7/v/7///9///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////+//3//v7/+v/3wtywjbFmhalPiKtdvdSk+/7w/v7+//7//v7///3///7///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////7+//3///7+/v7//v7////+/f79///+/////////////v79/v/7/v79/f77///+///////+/////////////////v7//Pz+/v7+/////f78/////////P///P/9/P78/f/6/v/8//////7///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////3//vv9///7yd6xcp5Hc6c9eKpBdqc9eJ9L2ubH/////v3+/v////7///7///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////76/v79+Pny+fv29Pfx4ujY9/zxztbC/f/6tLms3eLS4ebZ1NnE/P/05+vd///87O3p+/z49/j1+fn2+vv4+fn4+/346Ozf/P/72uHJ+f3z1t7K3+fU7vXrzdfB9vvvxs+39fns+vv1/f32/////v7+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////3///7++v3plrRrc6c2drA6dqlKea5Ad6FAxtWv/////v78///6///8//7//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Pv//f38/f//+f768Pjq9P3y5vDc/f/7193P7vPj9Prw8PXg+v/48/nr/f/5+fv2/P74+/33+fr1/P34+/35/f/89fnx+v776/Pg+v/25/He6/Xj8/vv4OvS+v/47PTi+v32///8/v77/fz//v7+/f39/f39/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////v7+/v7/8vnni61ldqs4dq84eqpLeKpDeaFK3OnN/////f36///4///9//7/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////+vr0/Pv48fPp9Pfu3+fZxtK47ffhtMOd6/Xgv8ys2eTE0NvGyte08fns0drF+/713N/X+fv07vHp9ffw8fTr6+3n9vvw0NjC+P31vsyn4OvWxNOx0d+91OLFrL2R3unbj5qF7fLq5eng8vXl+fn59vb2/////v7+///////////////////////////+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////+///////////////////////////////////////////////////+///////+///+///////////+///////////+///9///+///+///////////////////////////////////////////////////////+///+/////////////f79/f7++v/6pMCOb546d6o0eaU9cZ5AqcmM+f/2/vv///78///6//////7////////////////////////////////////////////+///+///////////////////////////////////////////////////+///+///////////////////+///+////////////+/v3/f369fft9/ny5Ozcztq97vniq72Q8PnetcOc1uS8093Dydes9//v2uTM/f/24OLa+/z18fTr+Pry9vjv8fPt+v/y2eLG+//2t8ia4u7TvM+iyNqw3ezIr8OM5/DjkpyI7PHt7/Tp+Pro+/v7+vr6/////v7+///////+//////////7////8///6///9/v7//v7//v3+/f78/f78/f39/f39/f39/fz9/fz9/fz9/Pz8/f39/v7+/v78/P37/f78/f78/Pz9/Pz8/Pz8/Pz8/Pz8/v7+///+///9///9///9/v7+/v7+/fz+/fv+/v3//v3+/v39//3///7//v/9/P/5/P/4/v/8/v3///7//v38/v39/vz//vz+/vz+//z///7////9///6/////v/z/P/2+v7/+v77//75/vv+/v39/v73/v72/v75/f76/f79/v7+/v79/v78/f78/f77/f39/f79/v79/v7+/v3+/v3+//79///6/v/6/v/+//////7///z//v39/v7+7/Xrr8aRkLFdkrRmvdKo+P32/v7//v71///x/v39/vz///79//38/v79/v39/vz9/v39/v39/vz9//v///3+/v78///4///6//7///3///7+///9/v//+/79/f39/vz+//v+/vv9/v3+/f39+v36/P74/f78/vz+//7//v/+/f/7/f/7/f7+/v7///7/+fr5/v3/7PTj8vfu2OXIuNOfwtyskLZmz+SzpsKHt9Kgp8CDn8Bw2+q9uc6f8fjozNe87/bo1eLF3ufU4/DZ1uLH5vDbutCn2+rEkrRqttCTq8yIs8+Vvtmfmrxx1+S9vdKj6fbj1OC95ezW+/z89Pj0/f7//v7////9///7///9/v////7////8///6///9/v3//v7//f37/Pz7/fz8/////////////////////////////////vz8/Pv8/v3+/Pv7/fz8/////////////////////////Pz8/v/+/////////v7+/////////P39/P///v/7///7//79//7////+/f/6/f/5//79/v7//f3+///8/v77/////v37/v7+/v3//v7////9///7///+//38/vz9+fv++fz+/vz+//z//////////////////////v///f3+/vz+//z+/Pz9/v7//////////////////////f3+/f7+/v3///7////+///9///+//77//77/f3////////89/zt9v/2///8/v78/f3+/v74///3/f3+/Pz++/37/v/9/////////////////////////f/9/Pz9/vz+/v79//79//7///7////+///8///8/f/7//7+//z//vr+/f35//////////////////////7//f3+///+/v/8/v/8/v///v3///7+9Pjx//762OPG4enWydmwmbt4uNSYeqdIv9qhhKdhnsCGnr14krpq1OjDpb6V6/jes8Sb7PfgxNes1eTF1unFwNKo4e7UnLaG0+a6hqxarsuKj7Jrmrp9rs6TgalcxdirlLB53/DYv9Cl1+HK+fr67fPr/f///f3+///9///6///+/v////7////8///6///+/////P7+////////////8vbx5Oni1t3Txc/CxM7AxM3B0tnP6e7m/////////f37///////95uvj0NXNxcnCy9DI4Obe9Pjw/////////v7+/////v7++vz49fvy9P7x8v3y8/zv9vvv/f/5//////7////+/v39//3//v7//f/89/zx9vzv9fzy9fzx9fvy+P38/P7//v/8///7//////v///r////////7+P/r8Pfk5fLV1+nI1ufO0+XI3OzN7vff///2///7//7+////+P305/Hb2ufK1+XJ2unR5/Tg+//x/////Pz//vz////8///5///+/v/5/P78+v/79f3t9f7s+P72+v34+fvt/f/3/fz//v3//v//////////+v/38frs6PTf3evO2OfI1+XJ2efO4/DZ7fzm/v/8/v7//vv+//3///79///5///9///9///9//38/f37/P/8////9f7w5PHc1uXHy9y0z+C54e/W9v74/////v76//////7//v3//v7////99Pfz//z87vbn9Pfx3uvMvdqj0+nAlr1w3fDAp8eBwuGmsMuNrc6Ox9TGf5N92efKxNWp2+rPw9aqy9261OfBxtmt1ufGrsiW3u7FmL1vxN2lsdGTudWgyeSxnMN73u/GutOh5/bfxder4u7T+Pn18vbs/f79/f7+///9///8/////v/////////9///7///+/f7+/v/+z9bLlqORdoVwWWtURlpAPlU3N1ExNlEuN08wPlM3Sl9EfI112OXT+v/1u8O3coBtSV1CPFA1Ok4zPFA2QlY7WW1SobGd+Pz4/////fz9////4ujfaXdiYXZaYXleY3hcXW1Twcm8/////fz9//z///z//fv+////v8q9Xm9WZHdbYnZdYHJYdYNw6/Pu/f///v/8///9//////78/P3w3ezJttGVnb1yiqxdgapReadGeqhGeaZDfqdIiaxcrcaO7Pfb8Pviw9qhmbduh6hRf6VGfKVFfaZKgqpUoLx23evL/v///P39///6///6//3//f37////xNS3lLJpmLpqmbd0lLBkw9Gm///+/Pv+/vz//f776fLaxNisosGAjrVhhKtQfqZDfKY/fqdDfaVGgKlRirNrudKi9fvq//7///z///79/v/3/f/7/v7///z//vz////97fneutShlblogKlNfKVEeKM4eqU6galMlblv1OS////2/f77/vz///3///3+///83+bY///11+HH2+LQw9Kki6lls8yZfaRXvNWfg6dWlbtsj7BflbxrkKaEKEMaq8OXiKdquNCmk7J1or2LqsmTka9xt9CWfZ1Uv9SYgKdMor95ja9jmLhxosWAeqZOu9GWh6hjz+a7jahlxNmn6u/h1dzP/////f39///+///9/////v/////////+///9//7/+/v9////cX1rJj8fME0nME0mM1QpNFcqM1cpMVgoM1gqM1YqM1MpKkggRmM+Y3xbNEwsL0snMVIoN1ctNVYsNVYrM1QpMFEnK0gicYRt8fjv+/v8/f3+9/r2YHFZKkMgMU4rNE8pKUEdgZB6/////Pz+/vv///v//fv9/v//hZWBKEEeNE8oM04rKkEhdYRv/P/9+/39///+///+/v7////+5fLPgqhccaFCc6ZAdak7c6w5c609dK1AdK47dKw5dag9cp9Ci7BlkLRuc59JdaNFeKpCd6s9d60+dq1AdKo9daE3gqNW0+O////5///7//7+//3///3+/P/2nLZ9cKA1cqk0cqc/bqM1xdur/////Pv8//7/+//unbd2dZxAdKRCc6hDdKk/dqw9dq08d608das9dqw9dKk8cp0/oLp99frq/v7//v3+/f36/P/7/f3//Pz/////0uDBja5ldaM7cac0das+eaxGeaxHeKxAdqs+cKY7e6BTyt20/v/6/fv+//3////9/v/9+f32/v369Pvv+/374ezLyd+s0uPFe5po3OnUrciPx+Oru9WWs9SS2urNpMCR1+zCpcCF3vHMvNeeyOCxy+Szwtui4fLIqceN4fLKncJ7zeW1s9GWvtij0Oi4ocZ/5/TOvdek7fvkwNak2enI/v/69/zy/f7+/f3+///9///9/////v///v/////+///+//7//Pz8////doRvL0slOVovN1csNlcrNFYqM1YoMlYmNFYoNlksNlYrOFgtM1MpLk4kOFctOlowN1gsM1QoNVYqNlgrNVcrNlcrOFktKEYekKKL////+vn7////maqTMEomOVkxOVgtNFAnVWtN7vbt/////v3+/vv+////8fnxWnBVMlAoOVgsOVgxNUsqsL2r////+/v8//7///7//f7+////yt+3daJHdq1GdKxGdaxAdKxAc6dJdaZNdqpLdatFdaxBeK1Ddac/c6VAeKtHeKxHdKlDdKpDdqxEdKtCdq1Ad646d6Q+jaxk7vje///+//3//v79////7fbaia1cdKs8c68+c6tIeKpU4PHV/////f36////6vXWhqlReao4eK0+dqtAdqtCdapCdKlAdKo/d64/dqw7eK06fK48c54/ts+f/f/8+/v8/vz+/f3++/36+//zvtSqep5UdaQ+eKw4d61GdKhIcaRDcqQ+eKpAdqpDd6xMdaZDhalg6/bh/////v3+/v78////4+je/f3209rM2tzXwc2mjqptjJ2BIkEPmq+HiKlfk7ZsjK1gh7FcpsGFgaVVm7lveJxDs9CJh6pTj7FjhapXiq5WscyMeJpTr8iPgahXor1/i6xjmLVvosB8e6FNvM+YhKJg0+nAkapqvNCi5+vi193T/////v7+///9///7/////v///v/////+//7+//7/+/z8////dIRsLkgjO1YwOVQuOVMuOVMuPlgzQVo4OlQwMksmOlQvOVQuOVUuOVYwOFUtMU0mNU8qQVo2O1UwMksnOVMuOlIvN1YqMVcjQlk65erj//7+////y9rHOlQxNVYtNlcpN1YnN1AuxdPD/////Pz7/vz9////ztvNO1U1NVUoNlcpNFIqR1o94enb/////vz+//3//////P7+/v/+sMmUdaU6dq49dqpCeqk/e6lGg61ThqxNeqVEeadFeKpEd6tBd6s+eKw9d6o5c6Y7fq1MgK5RdqVEeahAeao/cqxDea1DeJ9H0OC8/////f3+/f74////1+W7eqRCdaw8dq4/dKRBkLJr9Pzr///8/f73////0OC8e6JGdq09d6xAeqk8eadEfqlQg65Wf6tNdqQ9eqlBeKlFeK07dKk8iLFp7fzm/v79//r+/fr////3xNykdqFEd6o+ea4/d6pBdKRAibRcn8J5m79zgKlPeaZBeapAdq81cqJDxdq2/////v37///7/v//+P31+/34+f72////5e7MzOOt1+XQf5xu3evKp8SCxuKov9metdeV1Oe5nr943/LCqcaE3PHEsMuMv9miu9icss+O3PLFnr6G4PLOjbBxxNqtttOYvNWc1Om2psV/7fXQyd2u8fzo1eW75/PY/f/+9/z2/v///f3+///9///6///9/v/////8///////+///8/fv8////dIVrLEkhOVcwOVYuMUsncIRp3OPZ4uXh0tjReYd2NUssOVYuNFUsN1UvNVApbX9lvcW64OTc1dzSf4p5NkouOFUuNFcpNlkqL0kmsr6v/////Pv89frzYHJbMU4oOFgtN1gsLUojkaSM////+/z8/Pv9////orOeLkklOFgrN1grL0wjdYJt/f78+/39///////9/v79//7/9/7yk7dqdaY/dq5Bd6w9faVAxdqs8Pbd8PTYy965gKZXdqlCdqs/d6xAdahBibNcxt215/LZ7vXkydy8f6ZWdqs4dqw/dqpJdKQ7tM6Y/////f71/f73////vtOYdaFAda5Bda47daM1qsOI///9/v36/fv9////tNCYdKQ0d6xBdqxId6Q3r8SL6fHe6fXg6vLXqMGNdaNBeqpJdKs/c609falO3/DP/////fn9//7/3u3NfqdSdKlDdq4+d6o0fqROwtSl8vrn/P/9///6w9infKRHeKw4drE2caBAvc+j///6/f37/v/+/v//8/j2///+1uHO4OfWwtKjj65qt9KdeaBUss+Og6pUlb11iK1jhLJipcaDdpxPsM2We6NKncR3hq5ZkbRnhq9eibFmr86QfKBXnbeLKk4XaoRXkrNrlrVwocB9d6FJt9CchKZh1uzAlqx8vtKs9Pjt5unf///+/f39//7////+///9///+///6/////v/+///6/fv7////dIVrLEogOFcvOFctLkkkhJZ9////////////7vbvUWdJMVAmNVgtOFcxK0ggqLeh////////////9vvzWWtTLk4mNFgqOFgtLUgkkZ+N////+vf6////mqeWLUkkOVkvNlcrME4mX3RY9Pv0/f7+/f3+/v/8cYNqL0slOFcsOVctLkoksLqq////+vz8/v///v79/v79//7/5/TdgatSdqlEdq1Fd6k9iKtR7ffk//////3+////oMF9caQ9d61AeKxAcqI9osR9////////////////n79/b6cwd6w6eKtMcqQ1qsmK/////v7z/v77/v/7pb95c6FBdK5Eda49dqI4xNmr/////Pv6//3/+P74mLt3c6cweaxBdKtFd6Q91t/B/////f//////5vHYfKpIeKlEdK1BdK08fKVG3OvJ/////f3+/P/5pL6Ic6E/dq1Adqo/eqNHxduu///+//76+/v3//784e/VfKFbdqlBdK86dKJEwdGk///8/f39/v//////+f3+/P347vbn9frt2ujCudak1+/CncCB3O7An716vdinudObrc+S0um0ocCD4O7KoL93zum6p8OSssmYsdCPqMqJ1+q/nbp92enMf5t1v9GzssySu9Ke0+W2qMmH4PDPt9Of7vrd3ujO6fLj//74/P3y/f76/v7+//7////////8///8///6/////v/+///6/fv7////dIVrLEogOFcvOFctMEolgJJ5/f78/Pv8+fn7////gJN3LEohNlguOFcyLksjhJR9/f39+fr6+Pj4////hpiCKkcjN1kuOFctLUklgJB8/////Pn8////1d/RPFczNVUrNlgrNVQrPlM31NvS////////5OzhTF9FM1EqN1csNVEqQls54enc///+/P38/v7///7//Pz9////0OG+d6RCea1Bd61CdKQ7mrls+f7w/v37/Pn6/P76rc2HcqM8eKxCeqs/daI8p8OC/f79/Pz5/Pz0/v7+q8mRcqczeK0+eKxKc6M3rsqL/////v34////8Pjmjq1edqVBc6xCdaxAf6dK3uzM/////f37////6vbjg6lddao3dqpAdaxBfqpN6O/f/f78+vz1/v7+6/Xcga9LdqhBdK0/daw7f6VN3+3R////////2uvSf6NTeao+eq86dKM5ob2H+f/9/f7+////////+//ur8uNd6FHd6xDda4+d6JK1eO9/////v3+///////9/P799vP56/Pm9fnwt8Wfmrd70ee1hKtiyOWyj7VtociJkrhxirhsrc+Mh69iuNadiLFkosWgSGlIWHZPj7lxkb5st9eZfqZWs9GWgaxio8SFkrlnnL96tdOXh7Jdy+S6gKZh0ui/rsCby9y+9fXw6uvk///9/f39///////////9///9///6/////v/+///6/fv7////dIVrLEogOFcvOFctL0okgZR6///+/fz9/Pv9//7/k6SLLUoiOFgvN1YwLUsjgJF8////+/v8+/v8//7/m6uYKkglN1gvOFctLkolcIJr/////fv9/Pz8+v74Z31fME0mN1ktN1gsL0cnnaea////////usW1M0srOFgtOFgtL0glcYNr/v/9/f75/v78//7//vz//P38///+tM2bcqM4eK09eKxCdKE9tM2U///9/vz8/vr//f/6pMZ7c6M8eKtEe6xAd6E8u9Gc/v///vz6/v70/P/8ob6Hc6Y1eKxAd6tHc6I6utOZ/////Pz8////2urGfaNMeatCdKxBc6ZAj7Fk8/zo/////f39////1eXCeKJMdqw7eaxEcag6kLZq/P/8/f/4/P7z////3uzOeqhCd6pAdq0/c6k4iq1d7/jk///////8sc6ZdKI6eqtBeaw+eqU+0ui5/v/68/3n6PHbzuC9nr56eaVBd6w5d7BAcqVAjbBp9Prk///+//7////////7/v/+/Pr59fvz/f/81d3Fwte04fHToL2K3OvCk7Frss+RqcR8nsR0xNuaiald0eKujq9iutSrbYdfg5ptpcZ+nMByyuGtjaxf0uaqlLhpwtmaor9yrcaK0eO0oL585vPSwNmm7Pba5evS7fPl/Pz5+fn1/f38/f39///////////+///+///6/////v/+///6/fv7////dIVrLEogOFcvOFctL0okgZR7///+/v3+/fr9////n66WLUkhOFgvOFcxLEsjgZN+/////v39/Pz8////obCdLkkoN1cuOFctLksla39n/////v3+/Pv8////rbunL0gnOFouNVkqMEwoYnJe9/r2////hJN+LUgkOFouOVguMkgrtb+w/////P36///8//7//Pv/+/79+f/xmrp4c6Y4eK08eKtDeKJEzuC7/////fz7//7/9P3ukrZjdaY9d6pGeqs+eKBA1OO9/////fv6///78vrskLNwdKc6dqxBeKtFd6NG1Oe7/////Pr9////wNmgdaBFea1AdqxDdaJCpsCE/f/5/v7//f39///6ttCYcqFAdq1AeKxFcKU5q8mQ/////f75/P71////x9qwcaQ9eKtCdq1Bc6Y5m7l0+v/0//7/+P7skbpmdKczeapHeKlIfKlCmLhpmrRykrNogqlQdqM5dag4eK1Bea5Hc6dCe6ZW1Oi////4/vz+//7////+///7/f77///98vfp+Prz4OfLw9es3+vIiahs0ui6j69kqMuFmbprkbpntdGPg6Zfy+KvjLJarNCKkrZtocB7l71ulb1yv9ykgaZSvNiSf6lRp8V8mb1nob+AvtKhjq9p3/DRnLiB4vDS5/DX8Pnn/v3++/v5///+///////////////+///+///6/////v/+///6/fv7////dIVrLEogOFcvOFctL0okgZR7///+/v3+/fr9////n62XLkgiOFgvOFcxLEsigpN9/////f39/Pv8////obCcLkgmN1YuOFgtLEwka4Bl/////v3+/vz+////6/HoTWFIMVEoM1koN1cuOE0z0drN9vzxUmRKMVAoNFkqMlIpTmBH7fLp/////v78///7//3//vz//v/86fXWg6pZdao8d608eKhEhKlT5fHe/////fz4////4/PYfqdKdqo9dapHd6k9ha1S6fTd/////fz8////4u/UfaZQdas/d6xBc6c/hqxe6vfa//7//vv9/v/3o8V8dKRFd60+d61EdaBFw9eo/////Pz9/f3++//xnbt0cqU6da1Dd6tFdKM/yt61/////f38/P37///+rMmJbaM9ea1FdqxCcqI5ttCW///+////7Pbagq9Pdqk4eKpFd6hNeKhBd6c3eKQ+eaZCeKlIeKxJdqw/dak3daE+iqxi0ufA/P/3/f37//z///7//f/+/v/+/v/8//379Pnu+fn25uvX0uLA5vDUrseW1+nFl7Rzq8qOqcaDpcmHwdirm7eHzOG6i7Berc+LocN5rcqJoMR9nsOEyOG2krRwzOSxlrx4u9aeoMF7rMiV0ePBrcmU5/LitMul6fPl7PHp8/fy/vz/+/v7///////////////////////////6/////v/+///6/fv7////dIVrLEogOFcvOFctL0okgZR7///+/v3+/fr9////n6yZLkgjOFgvOFcxLEsigpN7/////f39/Pv7////obCbLkkkN1csOFgtLEwkaYBl/////v3///3//fz9////kJ2LK0gkNFopNlkrLEQknKqXzNfIM0csN1csNVsqK0ohhZV+/////P3+///9///6//3+/vz////70+O4e6NLdqxBd60+dqVDk7Vk9//3//3//fz3////ydy6daM9dq0+datJcaY5k7tm+f/1/f77/Pv7////ydy1d6M9da1Cdq1BcKQ7mLx4+P/w/fv///3/9vvmi7JdcqZGda09dqxEeqVL2+vD/////fz9/v//7/jliKpZdao5dK1EdapEfalL5vLV//7//vv8/f//+fzxkbVlb6hDeKtEdqtDdqY/zOSy////////5/HTfKlMeKlBeao7dqlHdqtCcqsucac9c6Y8cqQ+caRFeKhNjbJlu9Ge7/Xg/v/9+/38/vz///v//v/++//9/f///f7///z9/f/+//7/9vjw5/Hj+P3xyNu77/jforuCxd6stMqVsdCfu8qycYZn0eK+kK9nzeS2rsiUts6ctdSVqciM2OzCl7Zz2Ou8k7N3wNilsM2KssuX6PHSuM6d8Pbmt8mm7/Tl/v/1/Pz4//z////////////+///+///////////////9/////v/+//7+/fv8////dIVsK0oiN1gtN1gtLkokgZR6///+/f3+/fv9////nq2ZLUgkOFguOFcvLEokgZN8/////f39/Pv8////oq+cLkkkOFcsOVcuLUwkaoBl/////v3///7//f38//7+2uDYPFI4NVYsNlkoME4jV3BPc4lsMEslN1cpNFYpNU4wyNLG/////Pz9/v/////8///6/v3/////s9CZc6I9d65Bd61BdKE9scuM/v/+/fz+/v3y////q8iWc6Mze61CdKxHcaJAss6K///+/Pz7/fv+///+rcmKd6M3eapFdKxCc6JBtcyc///6/Pv8//7/3e3HfahGd6pFdatGdag5jLBX7vnn/v/+/f32////1ea+eqNHeKtAd64/c6c8j7Rk9v3v///7/fv7////5vHVgqpOdqhIeaxDdao7gqxY5vTZ////////4+/TeqlDdqw+dK0/dKpIe6lUl7tupsKIqsOKt86Ixtuf3e3Q8fvy///////+/v7+//////7///7////+/v///////v/+//3+/v/9////8fLu4ebX9vrqxdGy6fPWnLN5vNWkqMWLq8qVn7WRS2Q7v9O1lrt3zOS6pMKQrsuXrcmLo8SKzuO/kLBo0ui+ocWEw9qro8GBpcCH1OS9nbF/6vXZxNOw7vXh+/7w+v3z///////////////////+//////////////7////9/v/+//7//fv8////dIVtK0ojN1gtN1gtLkskgZV5///9/f3+/Pz9////nq2aLEglOFguOFguLEokgZN9/////f39/Pv8////oq+cLkklOVYsOVcuLkwla39m/////v3///7////8/fv6/v/+d4d2LkklN1goNlYnNFMrNFIsNlYrNlcoL0slYXRf+Pv5/vz8//3+/v///v/+///6/v//+P/5l7t4c6Y4eK1BdqtDd6NDy92w/////Pv8///3+v32kbV1d6c1eqlDdKxGc6JJzt+z/////fz9//7/9/3wk7ZoeKc5ealEdK1DeKNK0+G+///9+/v7/v//wdymdaM5eKtGdatNdKQ2o8By+//9+/38/P33////utOZdKE9eKxGeK0/cKM7qcmK/////P73/Pz7////y9+zd6I/eqlIeqtAdKg3lrl1+f3z//3+////6PTggKtQdalBda1Adaw7fahM4fTF///6+//////7///+////+/7//v/9/v34//7////////////////////////////9///8//////7/////////+vvz6uvf/f/w0d636vfZz+S50OS41unHqLyR6/XYpsaB3+7DscmVwtim0OCltdCZ5fLbsMeH7fTbtM6Z4OzJy96w1OO48fXj1t/J+//x7O7k/v74/v79//3///7///////////////////////////////7////9/v/+//7//fv8////dIVtK0ojN1gtN1gtLkskgZV5///+/f3+/Pz9////nq2YLEkjOFgsOFgtLUokgpJ7/////f39/Pv8////oq+cLkklOVYsOVcuLkwla39m/////v3///7////8/Pv5////xNLDNU4tOFcqNlUpNlUtN1UvNVQqOVgtMEkopbWk////+vn6/v79/v///v////7+////6/jjha1adak5d6tCd6pEf6ZS5fLT/////Pr8////6PLef6pYd6k6eapDcqtFfatV5/Pb/////fz9////5vPZgKlTd6o7d61Cc6s8gqlX6fTY////+/v//P/9p8WDc6M5dqxHdqtMdKI/vdOZ/////Pr8/f7+/P/+nrx8dKQ7dq1EdqxAcqNGw9yw/////f36/v79////scuSdKQ6eK1Ee6xAc6I6rsyQ///9/fv+//7/9v3xk7Zud6JIeKs+eK80d6U4o8B98Prl////////////+//98Pvo4u7Q9vjy///////////////////////////////9///9/////////f3+/v79+Pny0NTI+fzxs7+e3OrOqb2To7uJxdqxmrB61+y4h69bzeOwob2Itc+cts6NnL1/0OLCiqhg2urJkK94ydq3tMieucul6u7hy9LD+f3y19rR+fv0+/z4/Pz8//7///////////////////////////////7////9/v/+//7//fv8////dIVtLEojN1guOFctL0okgZR7///+/v3+/Pv8////nq2YLUgjOFgsOVgsLkojgpJ7/////f39/Pv8////oq+cLkgkOVYsOVcuLkwla39m/////v3///7////8/v37/f79+P34aXxjL0ojOlguNVUsNlYvOFctNVAqTGFH5e/l/v///f38/v77/v/8/v///v3+////1OPAeKNDeKw6eaxAdaY9krJp+P7p/v3//Pr7////z+G5dKZAeK08eKw/cKc+kLlr9/73/////vz+////y9+0daNFdq09dq5Acqc5l7l09/7s/v7+/v7/8/3rkbRic6c3da1DdqxHeaNI2+rB/////fv9////7Pjoiaxcdas4dK0/d6s/e6ZT4PDV/////v37//7/+f/xmLhuc6Y4dq5BeKpAeaNDzOGz/////fz+/fz+///9rsuOdaBFeaw/dq09d6lGdqBKjrJircqGssqMscmRo8GDj7Rgh6dh5fHj//////7+///////////////////////+//7+/////////f39/v78/f/6/////P3/8/rr+v/52+nP2+zK3+/OwdOm5vDTttGa5fLekqSSrL2t2ubIw9q47ffkvtKb7/jf0OHD7/Ti8/vo8ffq///++//4/f/6///8/v/7///9///9///+//////////////////////////////7////9/v/+//7//Pr8////dIVsLEkkOVgvOVcuL0omgpR7/////Pv9/Pr9////nquYLkgjOVctOVctLkokgpJ8/////fz9+/r7////o7CdL0kmOlcsOVYuLkwlbYFo/////v3///7//v/7/v/7+/z9////ucW0MkkoOVYtNVYtM1UtOVcuMEgmjJqI/v//+/z+///+///8/v/7/v/+/vz+///+vNGdcqI6eq0+fKw/daM5q8aG/v/3/v3+/f78///9ttCTcKc2d6w+fK09b6Q6q8yK/////fz9/Pr+/v/4ssyQc6JAd61Ed61BdKQ8r8mV///7/fv9////4fPPf6dMd6s7d65BdKg9ia1b8Pje///+/Pz4////2unGeqJDd642dq5Ad6g9j7Rn8fvu/////v38////5/TXh6tYdqo+dKxBeKlEhadU5vDS/////v3+/v7+////3vLSgalWdak2dq8+dKtLdqxJc6g2caQvcqI0c6E8caU6c6swfKhI3O/X/////v79///////////////////////+//7+/////////v7+/v7++vz57fDr/v/62ODF8vjpu8elscSTwdijiaFgt8ubdZxStsulQV04Zn5cr8STlbV/zOC5e5pO0+S6mLOC2OTFz96+1eHK/P375+nm///+9ff0///9///+///9///+//////////////////////////////7////9/v/+//3//Pr8////c4RtLUolOFcuOFYuL0kmgpR8/////fv9+/n8////oK2bLkclOVcuN1YtMEong5J+/////fz9/Pv8////oq+cLkglO1gtO1gwLkwlbIBn/////v3+//7//v/7/v/8/f3//v7+9vrzZ3hdM04oNlguM1csNlMsQVQ41t7T/////f3+/v79///+/v/7/v/8/v3//v/3n7d4dKRAeatHfKlCeKJBxtqr/////v39/v/8/f/ymrhxcKc9eKtIe6g/dqREyuC1/////Pz7/vv/+f7umrhwdaJCeqtMealGeKFEzeC+/////Pr8////yd6xdaFEe6tCeaxGc6Q9nbt4/v/5/v77+/z1////wNOkdqA+ea4/d6pNdaFBpsOA/f/+/v77/f76////0+O+e6BJealHdq1JcqREmLRu+v3t//3//v7+///8/v3+/f//zOG2fKRLcqQ7dqxHdq1Id65EeK5Ieq5Heq1IeK9GdrA8eKRG0eTF/////v7+//////////////////////7///7//////////v7+/v7//f7/+/z+/Pz//f/5/f7/8ffr7/jk5/bc1Oa77PfXqcmH6fXUuM2mzd674vDByeOx8/zs0uO28/jj4/Df9vjr+f32+/z8/v39/P36//79///9///+//////////////////////////////////////////7////9/v/+//3//Pn8////coVrLEgiOFcuN1ctLkgkgJF6/////fv9/Pn9////mqiYLkcnOFcvOFcuL0gngI98/////fz9/Pv8////n62ZLUgjOFYrOFYsLk0kaH1j///+//3//v3+/f77/f/7//7/+/v8////qLSeLkkkNVouNVkuLksmeopx/v/+/v3+/vz//f78//7////6/f76////7/Xii6hedKZDd6lReqdJeqRJ3/DQ/////vz9////6/PciKlfcqhLeKhSeqVEfqZS4+/f///9+/z5////5/HYh6dVeqZEeqdNe6ZIgqZT4e/b/////fv6///+q8WOc6JEeahIeqlMc6A/u9Wi/////Pz7+/75+vz7pLmEeKFCdqpId6ZZeJ9LxNmk/////f73/P75////t8ufeZ5FeqlOdqxMb6JDrcWH///5/vv//f/9/v/5//79/fv4///+1eXOlbV0eahCb6I0caQ/cKRCcKU5b6M3bqM/d6lGiatf3ObP/////v7+//////////////////////7///7////////+/v7+/v///f7//f7//f7/9Pbt/f385eng5O3c0uLInrSK3uzSf6VgzeG1lbJ9q8WTsseMja915/bjk6t53unSvtC87fLl8vjx9fj2/v369/fy///8/v78///+///////////////////////////////////////////////+/////////v39/v/93OPZy9fHzdrKzdrJzNfI4Obd///+/v3//v3/////5uvmzNbKzdrKztvLy9fJ3+bd///+/v7+/v7+////5+zly9bHzdvJzNvLy9jJ2+LX/v77//7+/////////vv9/Pv9////9PvxYXZZMUwnN1ctNVYuNVEvxNK//////fz9//3//v/+//7////9/v79////9vnw4OvM2+7H2+7N3O3J4O/M+f/1//7///7+////9/rw3uvN2u7N3O7P3u3I4O7O+f36///8/v78////9/rx3+vJ3e7G3u7L3u3I4u/P+f74/v79//79/v/95vHZ2uzG3e7K3O3K2+vG8Pjn/v///v7+/v/++/395u3X3u3I2+7J3e7S3erM9fro/////v/7/v/8/v//6fHf3uvH3u/L2u7J2u3H7/bf//79//3////+///8///9//76/fz/////9//w2evAvdOesceXpr6Jq8OItMuUvtWm1+rC8frh///8///////////////////////////////////////////+/v7+/////////v/+/v77/v74//7++/z5+v309Pvq6/Pc9fvv1ebC8vzk1+bD4vDN6PPS2+rI+f7v6vLY+f3s9/3z/P7z/f74/v/8//78/v77///+///+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////v38/v/95Ozm6/Lt////////6/LngJV5L0onOVYuOFctL0soan9l+f32/P77//7///7//v///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////v7+///////////////////5///9///////////////////////////////////////////////////////////////////////////////9///8////////9PT1+Pj38/Ps09XJ8fjlpK+Q8fjluMWk0t+81ODItL+g///20NLL9/nz4uTf9PXx/P37+vz5/////////////////////////////////////////////////////////////////////////////////////v79/f39/f39/f39/f39/v7+/////////////////v7+/f39/f39/f39/f39/v7+/////////////////v7+/f39/f39/f39/fz9/v3+/f39/f/8f5B5Rls/antkaXxiS2VCLkwlOFcuN1csNlUsOk81zNfJ/////Pz8//7//////v///////////////////////v79/v79/v79/v79/v79/////////////////////v79/v79/v79/v79/v79/////////////////////v79/v79/v79/v79/v79/////////////////v7+/v79/v79/v79/v79/v/+/////////////////v7+/v79/v79/v79/v79///+/////////////////v7+/v79/v79/v79/v79/v/+/////////////////////////////////v79/P36/P34/f74/f74/f75/P35/P36/f79/v/+///////////////////////////////////////////////////////////////9///8///+/////Pz9/f37+vvz8vPs+fz55uzf9/z27/bm8fno7/jx6fLk/P719Pbu+/32+Pr1+/z4/P37/P77/v7+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////9//78//7///3/////8PruWHFPLUsdL00jLE0hL1IkNlorNVcrOVgwKkYklZ+R/////Pz7/v3+//7//////v/+///+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////+/v79/v/9///9/v79/v7+/v7////+///////////////////////////////////////////////////////////////////////+///+/////////////f37/f35/f74/v/53eLQ9/zz4unV8Pbi4+nhytLC///85ufi+Pr1+v34+/z6/P77/f79///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////9//78//7//vz+////1+PVQVk3N1coOlotOVssN1osNlctNVMtKkQkcIVs+fv4/v3+/v3+//7///7//v///v////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////7////////////////////+///+///////////////////////////////////////////////////////+///+///////////////////9/v/9/v797/Hq+/378PTq9frx8fT05+zn/v389vb0/Pz7/f37///9///+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////+///9//7//fz9////w8u/O0w0MEgnLkcmLUclLkgmL0cpQlU9jZ2L8vrw///+//7+//7//v/+/////////v///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////v7//v7////6////8PPr+fv09ff68vXy/v797+/w/f39/v7+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////v///P/////////9/v77+Pr01t3UtL+0nqmbkZyOmqaXsbyu4Oje/////P37/f77///8///8/v/9/v/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////9///8///9///+//////////////////////////////////////////////////////////////////////////////////////////////////////7+/v/3//7+/P31/P73/Pz++/36/v7++/v9/v7+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////v///f///v/+///+//77///9/////////////////////////////Pz7/v3+///9/v/8/v/9/v/9/v/+//////7////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////9///8///9///+///+///////////////////////////////////////////////////////////////////////////////+///+//////////////7////8//7////7/v/8/v///v///////////v7/////////////////////////////////////////////////////////////////////////////"  # Pre-decoded raw RGB for PDF
-LOGO_W, LOGO_H = 180, 36
-LOGO_B64 = "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"
+
+def send_email(to_addr, subject, body_html):
+    if not SMTP_USER or not SMTP_PASS:
+        print(f"  [EMAIL] SMTP non configurato — messaggio non inviato a {to_addr}")
+        return False
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = SMTP_FROM
+        msg["To"]      = to_addr
+        msg.attach(MIMEText(body_html, "html", "utf-8"))
+        print(f"  [EMAIL] Connessione a {SMTP_HOST}:{SMTP_PORT} come {SMTP_USER}...")
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+            s.ehlo(); s.starttls(); s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SMTP_USER, to_addr, msg.as_string())
+        print(f"  [EMAIL] ✓ inviata a {to_addr}: {subject}")
+        return True
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"  [EMAIL] ✗ ERRORE AUTENTICAZIONE: {e}")
+        print(f"  [EMAIL]   Controlla SMTP_USER e SMTP_PASS — serve una App Password Gmail")
+        return False
+    except Exception as e:
+        print(f"  [EMAIL] ✗ errore: {e}")
+        return False
+
+def send_whatsapp(phone, message):
+    """CallMeBot — il cliente deve prima inviare una volta il messaggio
+       'I allow callmebot to send me messages' al numero +34 644 44 19 56 su WhatsApp.
+       Poi si ottiene un api_key che va salvato nel campo telefono come:
+       +393331234567|APIKEY"""
+    try:
+        if '|' not in phone:
+            print(f"  [WA] formato telefono non valido (serve +tel|apikey): {phone}")
+            return False
+        number, apikey = phone.split('|', 1)
+        number = number.strip(); apikey = apikey.strip()
+        encoded = _uparse.quote(message)
+        url = f"https://api.callmebot.com/whatsapp.php?phone={number}&text={encoded}&apikey={apikey}"
+        req = urllib.request.Request(url, headers={"User-Agent": "MyMine/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            resp = r.read().decode()
+        print(f"  [WA] inviato a {number}: {resp[:80]}")
+        return True
+    except Exception as e:
+        print(f"  [WA] errore: {e}")
+        return False
+
+def send_telegram(chat_id, message):
+    if not TG_BOT_TOKEN:
+        print("  [TG] Token non configurato"); return False
+    try:
+        url = "https://api.telegram.org/bot" + TG_BOT_TOKEN + "/sendMessage"
+        payload = json.dumps({"chat_id":chat_id,"text":message,"parse_mode":"HTML"}).encode()
+        req = urllib.request.Request(url,data=payload,headers={"Content-Type":"application/json"})
+        with urllib.request.urlopen(req,timeout=15) as r:
+            resp = json.loads(r.read())
+        if resp.get("ok"): print("  [TG] -> chat_id",chat_id); return True
+        print("  [TG] errore:",resp); return False
+    except Exception as e: print("  [TG] errore:",e); return False
+
+def _normalize_phone(phone):
+    import re as _re
+    phone = _re.sub(r'[\s\-\(\)]', '', phone.strip())
+    if phone.startswith('00'):
+        phone = '+' + phone[2:]
+    elif _re.match(r'^3\d{9}$', phone):
+        phone = '+39' + phone
+    return phone
+
+def _ascii_sms(text):
+    for o, n in [('\u00b0',' gradi'),('\u00e8','e'),('\u00e9','e'),('\u00e0','a'),
+                 ('\u00f9','u'),('\u00ec','i'),('\u00f2','o'),('\u2013','--'),('\u2014','--')]:
+        text = text.replace(o, n)
+    return text
+
+def send_sms(to_number, message):
+    """Invia SMS tramite SMSAPI (Bearer token OAuth2)."""
+    if not SMSAPI_TOKEN:
+        print(f"  [SMS] SMSAPI_TOKEN non configurato")
+        return False
+    try:
+        phone = _normalize_phone(to_number)
+        body  = _ascii_sms(message)
+        params = {
+            "to":      phone,
+            "message": body,
+            "format":  "json"
+        }
+        # Usa sender solo se configurato, altrimenti SMSAPI usa il default "Test"
+        if SMSAPI_SENDER:
+            params["from"] = SMSAPI_SENDER
+        data = _uparse.urlencode(params).encode("utf-8")
+        req  = urllib.request.Request(
+            "https://api.smsapi.com/sms.do", data=data,
+            headers={"Authorization": f"Bearer {SMSAPI_TOKEN}",
+                     "Content-Type":  "application/x-www-form-urlencoded"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw_resp = r.read()
+        print(f"  [SMS] Risposta SMSAPI raw: {raw_resp[:200]}")
+        try:
+            resp = json.loads(raw_resp)
+        except Exception:
+            resp = raw_resp.decode("utf-8","replace").strip()
+        # SMSAPI può restituire: intero (codice errore), dict con error/list, o stringa
+        SMSAPI_ERRORS = {
+            1:"Autorizzazione non valida",2:"Autorizzazione non valida",
+            4:"Credito insufficiente",8:"Numero di telefono non valido",
+            13:"Sender non trovato",14:"Sender non approvato — usa SMSAPI_SENDER=Test o approva il sender",
+            101:"Token non valido o scaduto — rigenera su smsapi.com > OAuth Tokens",
+            103:"Indirizzo IP non autorizzato",
+        }
+        if isinstance(resp, int):
+            msg = SMSAPI_ERRORS.get(resp, f"Codice errore sconosciuto: {resp}")
+            print(f"  [SMS] Errore SMSAPI {resp}: {msg}")
+            return False
+        if isinstance(resp, dict):
+            err = resp.get("error")
+            if err:
+                if isinstance(err, dict):
+                    code = err.get("code","?"); emsg = err.get("message", SMSAPI_ERRORS.get(code,"?"))
+                elif isinstance(err, int):
+                    code = err; emsg = SMSAPI_ERRORS.get(code, f"Codice {code}")
+                else:
+                    code = "?"; emsg = str(err)
+                print(f"  [SMS] Errore SMSAPI {code}: {emsg}")
+                return False
+            if resp.get("invalid_numbers"):
+                print(f"  [SMS] Numero non valido: {phone}")
+                return False
+            lst    = resp.get("list") or [{}]
+            sid    = lst[0].get("id","?") if lst else "?"
+            status = lst[0].get("status","?") if lst else "?"
+            print(f"  [SMS] OK to={phone} id={sid} status={status}")
+            return True
+        print(f"  [SMS] Risposta inattesa: {resp}")
+        return False
+    except urllib.error.HTTPError as e:
+        bd = e.read().decode()
+        print(f"  [SMS] HTTP {e.code}: {bd[:300]}")
+        if e.code == 401:
+            print(f"  [SMS] Token non valido — rigenera il token su smsapi.com > OAuth Tokens")
+        return False
+    except Exception as e:
+        print(f"  [SMS] errore: {e}")
+        return False
+def _get_payload(frame):
+    """Extract sensor payload - mirrors JS gP() function exactly."""
+    for key in ("decoded_payload", "object", "payload"):
+        p = frame.get(key)
+        if p and isinstance(p, dict):
+            return p
+    raw = frame.get("data", "")
+    if isinstance(raw, str) and raw:
+        try: return json.loads(raw)
+        except: pass
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+def _get_val(payload, *keys):
+    """Get first non-None value for given keys (handles 0 correctly)."""
+    for k in keys:
+        v = payload.get(k)
+        if v is not None:
+            return float(v)
+    return None
+
+def check_all_alarms():
+    clients=load_clients(); alerts=load_alerts()
+    now_str=datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        body,code=call_api("/device/")
+        if code!=200: print("  [ALARM] API devices code:",code); return
+        devs=json.loads(body)
+    except Exception as e: print("  [ALARM] fetch devices:",e); return
+    print(f"  [ALARM] Controllo {len(clients)} clienti...")
+    for client in clients:
+        eui=client.get("eui","").upper()
+        # Per-sensor thresholds (fall back to client-level)
+        _si_a = 0  # default first sensor for alarm check
+        _sens_a = (client.get("sensori") or [{}])[_si_a]
+        t_min = _sens_a.get("t_min") if _sens_a.get("t_min") is not None else client.get("t_min")
+        t_max = _sens_a.get("t_max") if _sens_a.get("t_max") is not None else client.get("t_max")
+        h_min = _sens_a.get("h_min") if _sens_a.get("h_min") is not None else client.get("h_min")
+        h_max = _sens_a.get("h_max") if _sens_a.get("h_max") is not None else client.get("h_max")
+        if all(v is None for v in [t_min,t_max,h_min,h_max]):
+            print(f"  [ALARM] {eui}: nessuna soglia definita, skip")
+            continue
+        dev=next((d for d in devs if (d.get("dev_eui","")).upper()==eui),None)
+        if not dev:
+            print(f"  [ALARM] {eui}: device non trovato nell'API, skip")
+            continue
+        try:
+            body,code=call_api("/frame/days/"+str(dev["id"])+"/1")
+            if code!=200: print(f"  [ALARM] {eui}: frame API code {code}"); continue
+            frames=json.loads(body)
+            if isinstance(frames,dict): frames=frames.get("frames") or frames.get("data") or frames.get("items") or []
+            if not frames: print(f"  [ALARM] {eui}: nessun frame"); continue
+            def gts(f):
+                v=f.get("time_created") or f.get("time") or ""
+                try: return datetime.fromisoformat(v.replace("Z","+00:00"))
+                except: return datetime.min.replace(tzinfo=timezone.utc)
+            latest=max(frames,key=gts)
+            p=_get_payload(latest)
+            T=_get_val(p, "temperature", "temp")
+            H=_get_val(p, "humidity", "hum")
+            print(f"  [ALARM] {eui}: T={T} H={H} soglie=[{t_min},{t_max},{h_min},{h_max}] payload_keys={list(p.keys())}")
+        except Exception as e: print(f"  [ALARM] {eui} frames err: {e}"); continue
+        issues=[]
+        if T is not None:
+            if t_min is not None and T<t_min: issues.append("Temperatura "+str(round(T,1))+"°C sotto minimo ("+str(t_min)+"°C)")
+            if t_max is not None and T>t_max: issues.append("Temperatura "+str(round(T,1))+"°C sopra massimo ("+str(t_max)+"°C)")
+        if H is not None:
+            if h_min is not None and H<h_min: issues.append("Umidità "+str(round(H,0))+"% sotto minimo ("+str(h_min)+"%)")
+            if h_max is not None and H>h_max: issues.append("Umidità "+str(round(H,0))+"% sopra massimo ("+str(h_max)+"%)")
+        if not issues:
+            print(f"  [ALARM] {eui}: valori nella norma")
+            if eui in alerts:
+                del alerts[eui]
+                save_alerts(alerts)
+                print(f"  [ALARM] {eui}: ✓ allarme rimosso (valori rientrati nelle soglie)")
+            continue
+        last_alert=alerts.get(eui,{}).get("last_sent","")
+        try:
+            if (datetime.now()-datetime.fromisoformat(last_alert)).total_seconds()<7200:
+                print(f"  [ALARM] {eui}: allarme già inviato meno di 2h fa, skip")
+                continue
+        except: pass
+        nome=(client.get("cognome","")+" "+client.get("nome","")).strip()
+        issues_html="".join("<li>"+x+"</li>" for x in issues)
+        issues_text="\n".join("- "+x for x in issues)
+        subj="Allarme MyMine - "+nome
+        html_body=("<div style='font-family:Arial,sans-serif;max-width:580px;margin:0 auto'>"
+            "<div style='background:#1F4E3D;padding:18px 24px;border-radius:8px 8px 0 0'>"
+            "<span style='color:#1DB584;font-size:20px;font-weight:800'>my</span>"
+            "<span style='color:#fff;font-size:20px;font-weight:800'>mine</span></div>"
+            "<div style='background:#FEF2F2;border:1px solid #D94F4F;border-top:none;padding:22px 24px;border-radius:0 0 8px 8px'>"
+            "<h2 style='color:#D94F4F;margin:0 0 12px'>Valori fuori soglia</h2>"
+            "<p><b>Cliente:</b> "+nome+"</p>"
+            "<p><b>Sensore:</b> "+eui+"</p>"
+            "<p><b>Indirizzo:</b> "+client.get("indirizzo","")+"</p>"
+            "<ul style='color:#B02020'>"+issues_html+"</ul>"
+            "<p style='color:#888;font-size:11px'>"+now_str+"</p>"
+            "</div></div>")
+
+        print(f"  [ALARM] ⚠ {nome} ({eui}): {issues}")
+        if client.get("notif_email") and client.get("email"):
+            send_email(client["email"],subj,html_body)
+        else:
+            print(f"  [ALARM]   email non inviata: notif_email={client.get('notif_email')}, email={client.get('email','')}")
+        if client.get("notif_sms") and client.get("telefono") and SMSAPI_TOKEN:
+            sms_body = f"ALLARME MyMine\nCliente: {nome}\nSensore: {eui}\n{issues_text}\n{now_str}"
+            send_sms(client["telefono"], sms_body)
+        alerts[eui]={"last_sent":now_str,"issues":issues,"nome":nome}
+        save_alerts(alerts)
+    print(f"  [ALARM] Controllo completato.")
+
+def alarm_thread():
+    _time.sleep(20)
+    while True:
+        try: check_all_alarms()
+        except Exception as e: print("  [ALARM] thread err:",e)
+        _time.sleep(ALERT_INTERVAL)
+
+def generate_password(length=10):
+    """Genera password alfanumerica sicura."""
+    import random, string
+    chars = string.ascii_letters + string.digits
+    return ''.join(random.SystemRandom().choice(chars) for _ in range(length))
+
+def daily_report_thread():
+    """Invia report PDF giornaliero alle 9:00 ora italiana per ogni cliente con email."""
+    import time as _t
+    try:
+        from zoneinfo import ZoneInfo
+        _ROME = ZoneInfo("Europe/Rome")
+    except Exception:
+        _ROME = None
+
+    def _now():
+        if _ROME:
+            return datetime.now(_ROME).replace(tzinfo=None)
+        return datetime.utcnow() + timedelta(hours=1)  # fallback CET
+
+    while True:
+        now = _now()
+        target = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target += timedelta(days=1)
+        wait = (target - now).total_seconds()
+        print(f"  [REPORT] Prossimo invio: {target.strftime('%Y-%m-%d 09:00')} (ora italiana)")
+        _t.sleep(wait)
+        try:
+            send_daily_reports()
+        except Exception as e:
+            print(f"  [REPORT] errore: {e}")
+
+def monthly_report_thread():
+    """Invia report mensile HACCP il 1° di ogni mese alle 06:00."""
+    import time as _t
+    try:
+        from zoneinfo import ZoneInfo
+        _ROME = ZoneInfo("Europe/Rome")
+    except Exception:
+        _ROME = None
+    def _now():
+        if _ROME: return datetime.now(_ROME).replace(tzinfo=None)
+        return datetime.utcnow() + timedelta(hours=1)
+    while True:
+        now = _now()
+        # Next 1st of month at 06:00
+        if now.day == 1 and now.hour < 6:
+            target = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        else:
+            # Go to next month
+            if now.month == 12:
+                target = now.replace(year=now.year+1, month=1, day=1, hour=6, minute=0, second=0, microsecond=0)
+            else:
+                target = now.replace(month=now.month+1, day=1, hour=6, minute=0, second=0, microsecond=0)
+        wait = (target - now).total_seconds()
+        print(f"  [REPORT MENSILE] Prossimo invio: {target.strftime('%Y-%m-%d 06:00')} (ora italiana)")
+        _t.sleep(wait)
+        try:
+            send_monthly_reports()
+        except Exception as e:
+            print(f"  [REPORT MENSILE] errore: {e}")
+
+def backup_thread():
+    """Invia backup automatico clients.json via email ogni notte alle 02:00."""
+    import time as _t, json as _json
+    try:
+        from zoneinfo import ZoneInfo
+        _ROME = ZoneInfo("Europe/Rome")
+    except Exception:
+        _ROME = None
+
+    def _now():
+        if _ROME:
+            return datetime.now(_ROME).replace(tzinfo=None)
+        return datetime.utcnow() + timedelta(hours=1)
+
+    while True:
+        now = _now()
+        target = now.replace(hour=2, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target += timedelta(days=1)
+        wait = (target - now).total_seconds()
+        _t.sleep(wait)
+        if not SMTP_USER or not SMTP_PASS or not ADMIN_USER:
+            continue
+        try:
+            clients = load_clients()
+            if not clients:
+                continue
+            data_json = _json.dumps({"clients": clients,
+                "exported_at": datetime.now().isoformat(),
+                "version": BUILD_TS}, indent=2, ensure_ascii=False)
+            ts = datetime.now().strftime("%Y-%m-%d")
+            subject = f"MyMine — Backup automatico clienti {ts}"
+            body_html = f"""<html><body>
+<p>Backup automatico notturno del database clienti MyMine.</p>
+<p><b>Data:</b> {ts}<br>
+<b>Clienti:</b> {len(clients)}<br>
+<b>Versione server:</b> {BUILD_TS}</p>
+<p>Il file JSON allegato contiene tutti i dati clienti.<br>
+Per ripristinare: pannello admin → ⬆ Importa clienti.</p>
+<hr><small>MyMine Dashboard — backup automatico</small>
+</body></html>"""
+            # Send with attachment
+            import email.mime.multipart as _mime_m
+            import email.mime.text as _mime_t
+            import email.mime.base as _mime_b
+            import email.encoders as _enc
+            msg = _mime_m.MIMEMultipart()
+            msg["From"] = SMTP_USER
+            msg["To"] = ADMIN_USER
+            msg["Subject"] = subject
+            msg.attach(_mime_t.MIMEText(body_html, "html", "utf-8"))
+            part = _mime_b.MIMEBase("application", "json")
+            part.set_payload(data_json.encode("utf-8"))
+            _enc.encode_base64(part)
+            part.add_header("Content-Disposition",
+                f'attachment; filename="mymine_backup_{ts}.json"')
+            msg.attach(part)
+            import smtplib as _smtp2
+            port = int(SMTP_PORT) if SMTP_PORT else 587
+            with _smtp2.SMTP(SMTP_HOST, port, timeout=30) as s:
+                s.starttls()
+                s.login(SMTP_USER, SMTP_PASS)
+                s.send_message(msg)
+            print(f"  [BACKUP] ✓ Backup inviato a {ADMIN_USER} ({len(clients)} clienti)")
+        except Exception as e:
+            print(f"  [BACKUP] errore invio: {e}")
+
+def _send_haccp_report(c, tipo="giornaliero"):
+    """Genera e invia PDF HACCP per tutti i sensori di un cliente."""
+    if not c.get("email") or not c.get("notif_email"):
+        return
+    MESI_IT = ["","Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno",
+               "Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
+    today = datetime.now()
+    if tipo == "giornaliero":
+        yday = (today - timedelta(days=1)).date()
+        period = yday.strftime("%d/%m/%Y")
+        mese_anno = MESI_IT[yday.month] + " " + str(yday.year)
+    else:
+        first = today.date().replace(day=1)
+        lme = first - timedelta(days=1)
+        period = MESI_IT[lme.month] + " " + str(lme.year)
+        mese_anno = period
+    nome = (c.get("cognome","") + " " + c.get("nome","")).strip()
+    try:
+        body, code = call_api("/device/")
+        if code != 200: return
+        devs = json.loads(body)
+        for _s in c.get("sensori", [{"eui": c.get("eui","")}]):
+            _eui  = _s.get("eui","").upper()
+            sname = _s.get("nome_frigo", _eui[-6:])
+            dev   = next((d for d in devs if (d.get("dev_eui","")).upper()==_eui), None)
+            if not dev: continue
+            dev_id = dev["id"]
+            if tipo == "giornaliero":
+                yday = (today - timedelta(days=1)).date()
+                rows = _fetch_frames(dev_id, yday)
+                rows_4h = _rows_ogni_4h(rows, yday, sname)
+            else:
+                first = today.date().replace(day=1)
+                lms = (first - timedelta(days=1)).replace(day=1)
+                lme = first - timedelta(days=1)
+                rows_4h = []
+                d = lms
+                while d <= lme:
+                    rows_4h.extend(_rows_ogni_4h(_fetch_frames(dev_id, d), d, sname))
+                    d += timedelta(days=1)
+            pdf = _build_pdf(nome, c, mese_anno, rows_4h, mese_anno, tipo)
+            subject = f"MyMine HACCP - Registro {sname} - {period}"
+            tipo_label = "giornaliero" if tipo=="giornaliero" else "mensile"
+            body_html = (
+                "<div style='font-family:Arial,sans-serif;max-width:580px;margin:0 auto'>"
+                "<div style='background:#1F4E3D;padding:18px 24px;border-radius:8px 8px 0 0'>"
+                "<span style='color:#1DB584;font-size:20px;font-weight:800'>my</span>"
+                "<span style='color:#fff;font-size:20px;font-weight:800'>mine</span></div>"
+                "<div style='background:#F0FBF6;border:1px solid #CEEADB;border-top:none;padding:22px 24px;border-radius:0 0 8px 8px'>"
+                f"<h2 style='color:#1A3D30;margin:0 0 12px'>Registro HACCP {tipo_label} — {period}</h2>"
+                f"<p><b>Cliente:</b> {nome}</p>"
+                f"<p><b>Frigorifero:</b> {sname}</p>"
+                f"<p><b>Indirizzo:</b> {c.get('indirizzo','')}</p>"
+                f"<p style='color:#4E7367;margin-top:12px'>In allegato il registro con misurazioni ogni 4 ore.</p>"
+                "</div></div>")
+            fn = f"HACCP_{sname.replace(' ','_')}_{period.replace('/','_').replace(' ','_')}.pdf"
+            send_email_with_attachment(c["email"], subject, body_html, pdf, fn)
+            print(f"  [REPORT] {tipo} inviato a {c['email']} ({nome} - {sname})")
+    except Exception as e:
+        print(f"  [REPORT] errore {tipo} per {c.get('cognome','')}: {e}")
+
+def send_daily_reports():
+    clients = load_clients()
+    yday = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y")
+    print(f"  [REPORT] Invio report giornaliero del {yday} a {len(clients)} clienti...")
+    for c in clients:
+        _send_haccp_report(c, "giornaliero")
+
+def send_monthly_reports():
+    clients = load_clients()
+    print(f"  [REPORT] Invio report mensile a {len(clients)} clienti...")
+    for c in clients:
+        _send_haccp_report(c, "mensile")
+
+def send_email_with_attachment(to_addr, subject, body_html, attach_bytes, attach_name):
+    from email.mime.base import MIMEBase
+    from email import encoders
+    if not SMTP_USER or not SMTP_PASS:
+        print(f"  [EMAIL] SMTP non configurato")
+        return False
+    try:
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_FROM
+        msg["To"] = to_addr
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(body_html, "html", "utf-8"))
+        msg.attach(alt)
+        part = MIMEBase("application", "pdf")
+        part.set_payload(attach_bytes)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=attach_name)
+        msg.attach(part)
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
+            s.ehlo(); s.starttls(); s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SMTP_USER, to_addr, msg.as_string())
+        print(f"  [EMAIL+PDF] inviata a {to_addr}: {subject}")
+        return True
+    except Exception as e:
+        print(f"  [EMAIL+PDF] errore: {e}")
+        return False
+
+
 LOGO_IMG = '<img src="data:image/png;base64,' + HACCP_LOGO_B64 + '" alt="MyMine" style="height:32px;width:auto;display:block">'
 
 # ─── CSS + shared pieces ───────────────────────────────────────────
@@ -2344,6 +2852,7 @@ if __name__=="__main__":
     _pg_init()  # Inizializza tabella PostgreSQL
     threading.Thread(target=alarm_thread,daemon=True).start()
     threading.Thread(target=daily_report_thread,daemon=True).start()
+    threading.Thread(target=monthly_report_thread,daemon=True).start()
     threading.Thread(target=backup_thread,daemon=True).start()
     srv=http.server.HTTPServer(("0.0.0.0",PORT),Handler)
     print("\n  MyMine Dashboard v3  ->  http://localhost:"+str(PORT))
