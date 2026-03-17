@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 14:17:39'
+BUILD_TS    = '2026-03-17 14:21:58'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1555,7 +1555,8 @@ async function loadClients(){
       if(c.h_min!=null)ranges.push('Umid. min '+c.h_min+'%');
       if(c.h_max!=null)ranges.push('Umid. max '+c.h_max+'%');
       return`<div class="ccard${hasAlarm?' alarm':''}" onclick="go(${i})">
-          <div class="ccard-name">${c.cognome} ${c.nome}${badge}${c.rag_soc?'<span style="font-weight:400;font-size:12px;color:var(--sub);margin-left:8px">'+c.rag_soc+'</span>':''}</div>
+          <div class="ccard-name">${c.cognome} ${c.nome}${badge}</div>
+          ${c.rag_soc?`<div style="font-size:12px;font-weight:600;color:var(--green2);margin:-4px 0 4px 0">🏢 ${c.rag_soc}</div>`:''}
         <div class="ccard-details">
           ${c.email?`✉ ${c.email}<br>`:''}${c.telefono?`📞 ${c.telefono}<br>`:''}
           P.IVA: ${c.piva||'—'} &nbsp;·&nbsp; 📍 ${c.indirizzo||'—'}<br>
