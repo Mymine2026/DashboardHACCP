@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 11:35:25'
+BUILD_TS    = '2026-03-17 12:03:37'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1606,6 +1606,73 @@ def daily_report_thread():
         except Exception as e:
             print(f"  [REPORT] errore: {e}")
 
+def backup_thread():
+    """Invia backup automatico clients.json via email ogni notte alle 02:00."""
+    import time as _t, json as _json
+    try:
+        from zoneinfo import ZoneInfo
+        _ROME = ZoneInfo("Europe/Rome")
+    except Exception:
+        _ROME = None
+
+    def _now():
+        if _ROME:
+            return datetime.now(_ROME).replace(tzinfo=None)
+        return datetime.utcnow() + timedelta(hours=1)
+
+    while True:
+        now = _now()
+        target = now.replace(hour=2, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target += timedelta(days=1)
+        wait = (target - now).total_seconds()
+        _t.sleep(wait)
+        if not SMTP_USER or not SMTP_PASS or not ADMIN_USER:
+            continue
+        try:
+            clients = load_clients()
+            if not clients:
+                continue
+            data_json = _json.dumps({"clients": clients,
+                "exported_at": datetime.now().isoformat(),
+                "version": BUILD_TS}, indent=2, ensure_ascii=False)
+            ts = datetime.now().strftime("%Y-%m-%d")
+            subject = f"MyMine — Backup automatico clienti {ts}"
+            body_html = f"""<html><body>
+<p>Backup automatico notturno del database clienti MyMine.</p>
+<p><b>Data:</b> {ts}<br>
+<b>Clienti:</b> {len(clients)}<br>
+<b>Versione server:</b> {BUILD_TS}</p>
+<p>Il file JSON allegato contiene tutti i dati clienti.<br>
+Per ripristinare: pannello admin → ⬆ Importa clienti.</p>
+<hr><small>MyMine Dashboard — backup automatico</small>
+</body></html>"""
+            # Send with attachment
+            import email.mime.multipart as _mime_m
+            import email.mime.text as _mime_t
+            import email.mime.base as _mime_b
+            import email.encoders as _enc
+            msg = _mime_m.MIMEMultipart()
+            msg["From"] = SMTP_USER
+            msg["To"] = ADMIN_USER
+            msg["Subject"] = subject
+            msg.attach(_mime_t.MIMEText(body_html, "html", "utf-8"))
+            part = _mime_b.MIMEBase("application", "json")
+            part.set_payload(data_json.encode("utf-8"))
+            _enc.encode_base64(part)
+            part.add_header("Content-Disposition",
+                f'attachment; filename="mymine_backup_{ts}.json"')
+            msg.attach(part)
+            import smtplib as _smtp2
+            port = int(SMTP_PORT) if SMTP_PORT else 587
+            with _smtp2.SMTP(SMTP_HOST, port, timeout=30) as s:
+                s.starttls()
+                s.login(SMTP_USER, SMTP_PASS)
+                s.send_message(msg)
+            print(f"  [BACKUP] ✓ Backup inviato a {ADMIN_USER} ({len(clients)} clienti)")
+        except Exception as e:
+            print(f"  [BACKUP] errore invio: {e}")
+
 def send_daily_reports():
     clients = load_clients()
     yday = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y")
@@ -2139,6 +2206,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 if __name__=="__main__":
     threading.Thread(target=alarm_thread,daemon=True).start()
     threading.Thread(target=daily_report_thread,daemon=True).start()
+    threading.Thread(target=backup_thread,daemon=True).start()
     srv=http.server.HTTPServer(("0.0.0.0",PORT),Handler)
     print("\n  MyMine Dashboard v3  ->  http://localhost:"+str(PORT))
     print("  Build: "+BUILD_TS)
@@ -2155,7 +2223,7 @@ if __name__=="__main__":
         print("  [!] ATTENZIONE: SMTP_PASS non sembra una App Password Gmail valida")
         print("      Le App Password Gmail sono 16 lettere senza spazi (es: abcdefghijklmnop)")
         print("      Generala da: myaccount.google.com > Sicurezza > Password per le app")
-    if not TWILIO_ACCOUNT_SID: print("  [!] Configura TWILIO_ACCOUNT_SID/AUTH_TOKEN/FROM_NUMBER per SMS")
+    if not SMSAPI_TOKEN: print("  [!] Configura SMSAPI_TOKEN per gli SMS")
     print("  CTRL+C per fermare\n")
     try: srv.serve_forever()
     except KeyboardInterrupt: print("\n  Fermato."); sys.exit(0)
