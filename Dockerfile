@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY trackpac_server.py .
 COPY sensori.txt .
+COPY onboarding.html .
 
 RUN pip install --no-cache-dir psycopg2-binary && \
     mkdir -p /app/data && chmod 777 /app/data

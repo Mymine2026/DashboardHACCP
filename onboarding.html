@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyMine HACCP — Configurazione Account</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --green:   #1DB584;
+    --green2:  #0F9A6E;
+    --dark:    #0D2B1F;
+    --text:    #1A3D30;
+    --sub:     #4E7367;
+    --dim:     #8DBDAF;
+    --bg:      #F0F6F3;
+    --bg2:     #FFFFFF;
+    --line:    #CEEADB;
+    --line2:   #A8D8C4;
+    --red:     #E05252;
+    --mono:    'DM Mono', monospace;
+    --sans:    'DM Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ── Background pattern ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 800px 600px at 80% -10%, rgba(29,181,132,.10) 0%, transparent 60%),
+      radial-gradient(ellipse 600px 500px at -5% 90%, rgba(29,181,132,.07) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Header ── */
+  header {
+    width: 100%;
+    padding: 22px 40px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255,255,255,.85);
+    backdrop-filter: blur(12px);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .logo-mark {
+    width: 36px; height: 36px;
+    background: var(--dark);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .logo-mark svg { width: 20px; height: 20px; }
+
+  .logo-text { font-size: 17px; font-weight: 700; letter-spacing: -.3px; }
+  .logo-text span { color: var(--green); }
+
+  .logo-badge {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--sub);
+    border-radius: 20px;
+    padding: 4px 12px;
+    letter-spacing: .04em;
+  }
+
+  /* ── Main wrapper ── */
+  main {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 680px;
+    padding: 48px 24px 80px;
+  }
+
+  /* ── Hero ── */
+  .hero { margin-bottom: 40px; }
+
+  .hero-kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--green);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hero-kicker::before {
+    content: '';
+    display: block;
+    width: 20px; height: 2px;
+    background: var(--green);
+    border-radius: 2px;
+  }
+
+  .hero h1 {
+    font-size: clamp(26px, 5vw, 34px);
+    font-weight: 700;
+    line-height: 1.18;
+    letter-spacing: -.6px;
+    margin-bottom: 14px;
+  }
+
+  .hero p {
+    font-size: 15px;
+    color: var(--sub);
+    line-height: 1.7;
+    max-width: 520px;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 2px 24px rgba(13,43,31,.06), 0 1px 4px rgba(13,43,31,.04);
+  }
+
+  /* ── Section header inside card ── */
+  .section-header {
+    padding: 18px 28px 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-icon {
+    width: 32px; height: 32px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  .section-title { font-size: 13px; font-weight: 700; }
+  .section-sub { font-size: 11px; color: var(--dim); font-family: var(--mono); }
+
+  /* ── Form body ── */
+  .form-body { padding: 24px 28px; }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .row3 { display: grid; grid-template-columns: 90px 1fr 60px; gap: 14px; }
+
+  @media (max-width: 520px) {
+    .row2 { grid-template-columns: 1fr; }
+    .row3 { grid-template-columns: 1fr 1fr; }
+    .row3 .field:first-child { grid-column: 1 / -1; }
+  }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+
+  .field label {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--sub);
+  }
+
+  .field .opt {
+    color: var(--dim);
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 9px;
+  }
+
+  .field input, .field select {
+    width: 100%;
+    background: var(--bg);
+    border: 1.5px solid var(--line);
+    color: var(--text);
+    border-radius: 11px;
+    padding: 12px 15px;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 400;
+    outline: none;
+    transition: border-color .18s, background .18s, box-shadow .18s;
+    -webkit-appearance: none;
+  }
+
+  .field input:focus, .field select:focus {
+    border-color: var(--green);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(29,181,132,.12);
+  }
+
+  .field input.error {
+    border-color: var(--red);
+    box-shadow: 0 0 0 3px rgba(224,82,82,.10);
+  }
+
+  .field .hint {
+    font-size: 11px;
+    color: var(--dim);
+    font-family: var(--mono);
+    line-height: 1.5;
+  }
+
+  /* ── Divider ── */
+  .divider {
+    height: 1px;
+    background: var(--line);
+    margin: 22px 0;
+  }
+
+  /* ── Separator section ── */
+  .sep-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 24px 0 18px;
+  }
+  .sep-label span {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--sub);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    white-space: nowrap;
+  }
+  .sep-label::before, .sep-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  /* ── Info box ── */
+  .info-box {
+    background: rgba(29,181,132,.06);
+    border: 1px solid rgba(29,181,132,.25);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.6;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+  .info-box .icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+  /* ── Submit button ── */
+  .submit-area {
+    padding: 20px 28px 28px;
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+  }
+
+  .btn-submit {
+    width: 100%;
+    background: linear-gradient(135deg, var(--green), var(--green2));
+    color: #fff;
+    border: none;
+    border-radius: 13px;
+    padding: 16px;
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: filter .2s, transform .15s, box-shadow .2s;
+    box-shadow: 0 4px 18px rgba(29,181,132,.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    letter-spacing: -.1px;
+  }
+
+  .btn-submit:hover:not(:disabled) {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 22px rgba(29,181,132,.45);
+  }
+
+  .btn-submit:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-submit .spin {
+    display: none;
+    width: 18px; height: 18px;
+    border: 2.5px solid rgba(255,255,255,.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  .btn-submit.loading .spin { display: block; }
+  .btn-submit.loading .arrow { display: none; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Messages ── */
+  #msgBox {
+    margin-top: 14px;
+    border-radius: 11px;
+    padding: 13px 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    display: none;
+  }
+  #msgBox.error {
+    background: #FEF2F2;
+    border: 1px solid rgba(224,82,82,.3);
+    color: #B91C1C;
+    display: block;
+  }
+  #msgBox.success {
+    background: #F0FBF6;
+    border: 1px solid rgba(29,181,132,.3);
+    color: var(--text);
+    display: block;
+  }
+
+  /* ── Success screen ── */
+  #successScreen {
+    display: none;
+    text-align: center;
+    padding: 48px 28px 56px;
+  }
+
+  .success-icon {
+    width: 72px; height: 72px;
+    background: linear-gradient(135deg, var(--green), var(--green2));
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 24px;
+    box-shadow: 0 8px 28px rgba(29,181,132,.3);
+    font-size: 32px;
+  }
+
+  #successScreen h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    letter-spacing: -.3px;
+  }
+
+  #successScreen p {
+    color: var(--sub);
+    font-size: 14px;
+    line-height: 1.7;
+    max-width: 380px;
+    margin: 0 auto;
+  }
+
+  /* ── Footer ── */
+  footer {
+    position: relative;
+    z-index: 1;
+    padding: 24px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: .06em;
+  }
+
+  /* ── Stagger animation ── */
+  .card { animation: fadeUp .4s ease both; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">
+    <svg viewBox="0 0 20 20" fill="none">
+      <path d="M4 10 C4 6.7 6.7 4 10 4 C13.3 4 16 6.7 16 10 C16 13.3 13.3 16 10 16" stroke="#1DB584" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="10" cy="10" r="2.5" fill="#1DB584"/>
+    </svg>
+  </div>
+  <div>
+    <div class="logo-text"><span>my</span>mine</div>
+  </div>
+  <div class="logo-badge">Sistema HACCP IoT</div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="hero-kicker">Configurazione account</div>
+    <h1>Benvenuto nel sistema<br>di monitoraggio HACCP</h1>
+    <p>Compila il modulo sottostante con i dati della tua attività. Il tuo account verrà configurato automaticamente e riceverai le credenziali di accesso via email entro pochi minuti.</p>
+  </div>
+
+  <div class="card" id="formCard">
+
+    <!-- SECTION 1: Dati personali -->
+    <div class="section-header">
+      <div class="section-icon">👤</div>
+      <div>
+        <div class="section-title">Dati del referente</div>
+        <div class="section-sub">Chi gestisce il sistema HACCP</div>
+      </div>
+    </div>
+
+    <div class="form-body">
+      <div class="row2">
+        <div class="field">
+          <label>Nome <span style="color:var(--red)">*</span></label>
+          <input id="fNome" type="text" placeholder="Mario" autocomplete="given-name">
+        </div>
+        <div class="field">
+          <label>Cognome <span style="color:var(--red)">*</span></label>
+          <input id="fCognome" type="text" placeholder="Rossi" autocomplete="family-name">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- SECTION 2: Dati azienda -->
+      <div class="sep-label"><span>Dati azienda</span></div>
+
+      <div class="field" style="margin-bottom:14px">
+        <label>Ragione Sociale <span style="color:var(--red)">*</span></label>
+        <input id="fRagSoc" type="text" placeholder="Pizzeria Roma Srl / Bar Centrale" autocomplete="organization">
+      </div>
+
+      <div class="row2" style="margin-bottom:14px">
+        <div class="field">
+          <label>Partita IVA <span style="color:var(--red)">*</span></label>
+          <input id="fPiva" type="text" placeholder="IT01234567890" maxlength="13">
+        </div>
+        <div class="field">
+          <label>Telefono <span style="color:var(--red)">*</span></label>
+          <input id="fTel" type="tel" placeholder="+39 333 1234567" autocomplete="tel">
+        </div>
+      </div>
+
+      <div class="field" style="margin-bottom:14px">
+        <label>Email <span style="color:var(--red)">*</span></label>
+        <input id="fEmail" type="email" placeholder="mario.rossi@azienda.it" autocomplete="email">
+        <div class="hint">Riceverai le credenziali di accesso a questo indirizzo</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- SECTION 3: Sede -->
+      <div class="sep-label"><span>Sede / Installazione sensori</span></div>
+
+      <div class="field" style="margin-bottom:14px">
+        <label>Indirizzo <span style="color:var(--red)">*</span></label>
+        <input id="fAddr" type="text" placeholder="Via Roma, 1" autocomplete="street-address">
+      </div>
+
+      <div class="row3">
+        <div class="field">
+          <label>CAP <span style="color:var(--red)">*</span></label>
+          <input id="fCap" type="text" placeholder="20100" maxlength="5" inputmode="numeric">
+        </div>
+        <div class="field">
+          <label>Città <span style="color:var(--red)">*</span></label>
+          <input id="fCitta" type="text" placeholder="Milano" autocomplete="address-level2">
+        </div>
+        <div class="field">
+          <label>Prov.</label>
+          <input id="fProv" type="text" placeholder="MI" maxlength="2" style="text-transform:uppercase">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- SECTION 4: HACCP -->
+      <div class="sep-label"><span>Responsabile HACCP</span></div>
+
+      <div class="info-box">
+        <div class="icon">ℹ️</div>
+        <div>Il Responsabile HACCP è la figura designata per la gestione della sicurezza alimentare. Comparirà nei registri ufficiali come firmatario.</div>
+      </div>
+
+      <div class="field">
+        <label>Nome Responsabile HACCP <span class="opt">(se diverso dal referente)</span></label>
+        <input id="fRespHaccp" type="text" placeholder="es. Mario Rossi">
+      </div>
+
+    </div>
+
+    <!-- SUCCESS inside card -->
+    <div id="successScreen">
+      <div class="success-icon">✓</div>
+      <h2>Configurazione inviata!</h2>
+      <p>I tuoi dati sono stati ricevuti. Riceverai le credenziali di accesso alla dashboard MyMine all'indirizzo email indicato entro pochi minuti.</p>
+    </div>
+
+    <!-- Submit -->
+    <div class="submit-area" id="submitArea">
+      <button class="btn-submit" id="btnSubmit" onclick="submitForm()">
+        <span class="arrow">Invia configurazione →</span>
+        <div class="spin"></div>
+      </button>
+      <div id="msgBox"></div>
+    </div>
+
+  </div>
+</main>
+
+<footer>© 2026 MyMine Srl · P.IVA IT12038850967 · Sistema HACCP IoT</footer>
+
+<script>
+// ── CONFIG ─────────────────────────────────────────────────────────────────
+// Sostituisci con l'URL del tuo webhook n8n
+const N8N_WEBHOOK_URL = 'https://INCOLLA_QUI_URL_WEBHOOK_N8N';
+// ───────────────────────────────────────────────────────────────────────────
+
+function g(id) { return document.getElementById(id); }
+function val(id) { return (g(id).value || '').trim(); }
+function setError(id, on) { g(id).classList.toggle('error', on); }
+
+function validate() {
+  const required = ['fNome','fCognome','fRagSoc','fPiva','fEmail','fTel','fAddr','fCap','fCitta'];
+  let ok = true;
+  required.forEach(function(id) {
+    const v = val(id);
+    const empty = !v;
+    setError(id, empty);
+    if (empty) ok = false;
+  });
+  // Email format
+  const email = val('fEmail');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setError('fEmail', true);
+    ok = false;
+  }
+  return ok;
+}
+
+async function submitForm() {
+  if (!validate()) {
+    g('msgBox').className = 'error';
+    g('msgBox').textContent = '⚠ Compila tutti i campi obbligatori (evidenziati in rosso).';
+    return;
+  }
+
+  const btn = g('btnSubmit');
+  btn.disabled = true;
+  btn.classList.add('loading');
+  g('msgBox').style.display = 'none';
+
+  const payload = {
+    nome:        val('fNome'),
+    cognome:     val('fCognome'),
+    rag_soc:     val('fRagSoc'),
+    piva:        val('fPiva'),
+    email:       val('fEmail'),
+    telefono:    val('fTel'),
+    indirizzo:   val('fAddr'),
+    cap:         val('fCap'),
+    citta:       val('fCitta'),
+    provincia:   val('fProv').toUpperCase(),
+    resp_haccp:  val('fRespHaccp') || val('fNome') + ' ' + val('fCognome'),
+    // Sensore placeholder — sarà aggiunto da MyMine in dashboard
+    sensori: [{
+      eui: 'DA_CONFIGURARE',
+      nome_frigo: 'Frigo 1',
+      t_min: 0, t_max: 4,
+      h_min: null, h_max: null
+    }],
+    notif_email: true,
+    notif_sms:   false
+  };
+
+  try {
+    const res = await fetch(N8N_WEBHOOK_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      throw new Error('Errore server: ' + res.status);
+    }
+
+    // Show success
+    g('formCard').querySelectorAll('.section-header, .form-body').forEach(function(el) {
+      el.style.display = 'none';
+    });
+    g('submitArea').style.display = 'none';
+    g('successScreen').style.display = 'block';
+
+  } catch (err) {
+    g('msgBox').className = 'error';
+    g('msgBox').textContent = '⚠ Si è verificato un errore: ' + err.message + '. Riprova o contatta supporto@mymine.io';
+    btn.disabled = false;
+    btn.classList.remove('loading');
+  }
+}
+
+// Clear error on input
+document.querySelectorAll('input').forEach(function(inp) {
+  inp.addEventListener('input', function() {
+    inp.classList.remove('error');
+    g('msgBox').style.display = 'none';
+    g('msgBox').className = '';
+  });
+});
+</script>
+</body>
+</html>

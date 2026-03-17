@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 14:34:17'
+BUILD_TS    = '2026-03-17 17:07:38'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -2464,6 +2464,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed=urlparse(self.path); qs=parse_qs(parsed.query); path=parsed.path
 
         # ── Public routes ──
+        if path == "/onboarding":
+            try:
+                import os as _os2
+                _f = _os2.path.join(_os2.path.dirname(__file__), "onboarding.html")
+                self.send_html(open(_f, encoding="utf-8").read()); return
+            except:
+                self.send_response(404); self.end_headers(); return
         if path == "/login":
             self.send_html(HTML_LOGIN_FINAL); return
         if path == "/logout":
