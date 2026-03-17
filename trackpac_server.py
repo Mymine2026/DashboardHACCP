@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 13:14:01'
+BUILD_TS    = '2026-03-17 13:26:10'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -432,196 +432,213 @@ def generate_pdf_report(client, tipo="giornaliero"):
         return None, str(e)
 
 def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
-    """
-    Genera PDF Registro HACCP.
-    rows_4h: lista di dict {ora: "HH:MM", sensore: str, T: float|None, H: float|None}
-    mese_anno: stringa es. "Marzo 2026"
-    tipo: "giornaliero" o "mensile"
-    """
+    """Genera PDF Registro HACCP conforme D.Lgs. 193/2007."""
+
     def esc(s):
-        s = str(s).replace("\\","\\\\").replace("(","\\(").replace(")","\\)")
+        s = str(s)
+        for a, b in [("\xe0","a"),("\xe8","e"),("\xe9","e"),("\xec","i"),
+                     ("\xf2","o"),("\xf9","u"),("\xc0","A"),("\xc8","E"),
+                     ("\xc9","E"),("\xcc","I"),("\xd2","O"),("\xd9","U"),
+                     (chr(224),"a"),(chr(232),"e"),(chr(233),"e"),(chr(236),"i"),
+                     (chr(242),"o"),(chr(249),"u")]:
+            s = s.replace(a, b)
+        s = s.replace("\\","\\\\").replace("(","\\(").replace(")","\\)")
         return s.encode("latin-1", errors="replace").decode("latin-1")
+
     def fmt(v, d=1):
         return f"{v:.{d}f}" if v is not None else ""
 
-    W, H   = 595, 842    # A4
-    ML, MR = 30, 30
-    MT     = 820         # top y
-    C_BLK  = "0 0 0"
-    C_GRY  = "0.5 0.5 0.5"
-    C_LGR  = "0.85 0.85 0.85"
-    C_VLG  = "0.95 0.95 0.95"
-    C_RED  = "0.8 0 0"
+    PW, PH = 595, 842
+    LM, RM = 35, 35
+    TM     = 810
+    BM     = 40
+    TW     = PW - LM - RM   # 525
+
+    BLACK = "0 0 0"
+    DGREY = "0.35 0.35 0.35"
+    LGREY = "0.75 0.75 0.75"
+    VLGRY = "0.93 0.93 0.93"
+    WHITE = "1 1 1"
+    DBLUE = "0.05 0.15 0.40"
+    LBLUE = "0.88 0.91 0.97"
+    RED   = "0.75 0.05 0.05"
+
+    # cols: Giorno|Ora|Sensore|Temp|Umid|Note|Azioni  — sum=525
+    COLS  = [50, 34, 70, 52, 48, 136, 135]
+    CLBLS = ["Giorno","Ora","Sensore","Temp.(C)","Umid.(%)","Note / Anomalie","Azioni Correttive"]
+    RH    = 17
 
     ops = []
     def g(s): ops.append(s)
 
-    def rect(x, y, w, h, color, fill=True):
-        g(f"{color} {'rg' if fill else 'RG'}")
-        g(f"{x:.1f} {y:.1f} {w:.1f} {h:.1f} re {'f' if fill else 'S'}")
+    def filledbox(x, y, w, h, rgb):
+        g(f"q {rgb} rg {x:.2f} {y:.2f} {w:.2f} {h:.2f} re f Q")
 
-    def line(x1, y1, x2, y2, width=0.5, color="0 0 0"):
-        g(f"{width} w {color} RG")
-        g(f"{x1:.1f} {y1:.1f} m {x2:.1f} {y2:.1f} l S")
+    def strokedbox(x, y, w, h, rgb="0.75 0.75 0.75", lw=0.5):
+        g(f"q {lw} w {rgb} RG {x:.2f} {y:.2f} {w:.2f} {h:.2f} re S Q")
 
-    def txt(x, y, font, size, color, text, align="left"):
-        if align == "center":
-            # approximate centering
-            g(f"BT /{font} {size} Tf")
-            g(f"{color} rg")
-            g(f"{x:.1f} {y:.1f} Td ({esc(text)}) Tj ET")
-        else:
-            g(f"BT /{font} {size} Tf {color} rg {x:.1f} {y:.1f} Td ({esc(text)}) Tj ET")
+    def hline(y, x1=None, x2=None, lw=0.5, rgb="0.75 0.75 0.75"):
+        x1 = x1 or LM; x2 = x2 or (PW - RM)
+        g(f"q {lw} w {rgb} RG {x1:.2f} {y:.2f} m {x2:.2f} {y:.2f} l S Q")
 
-    def hrule(y, lw=0.5):
-        line(ML, y, W-MR, y, lw)
+    def vline(x, y1, y2, lw=0.3, rgb="0.75 0.75 0.75"):
+        g(f"q {lw} w {rgb} RG {x:.2f} {y1:.2f} m {x:.2f} {y2:.2f} l S Q")
 
-    # ─── TITOLO ──────────────────────────────────────────
-    y = MT - 10
-    txt(ML, y, "F2", 14, C_BLK, "REGISTRO CONTROLLO TEMPERATURE FRIGORIFERI")
-    y -= 16
-    txt(ML, y, "F1", 10, C_GRY, "Sistema HACCP - Conformita D.Lgs. 193/2007")
-    y -= 8
-    hrule(y, 1.5)
+    def txt(x, y, font, size, rgb, s):
+        g(f"BT /{font} {size} Tf {rgb} rg {x:.2f} {y:.2f} Td ({esc(s)}) Tj ET")
 
-    # ─── DATI ANAGRAFICI ─────────────────────────────────
-    y -= 14
-    bh = 52
-    rect(ML, y-bh, W-ML-MR, bh, C_VLG)
-    rect(ML, y-bh, W-ML-MR, bh, C_BLK, False)
-    txt(ML+5, y-13,  "F2", 9, C_BLK, "DATI OPERATORE / AZIENDA")
-    rag_soc = nome
-    addr    = client.get("indirizzo","")
-    city    = " ".join(filter(None, [client.get("cap",""), client.get("citta",""), client.get("provincia","")]))
-    piva    = client.get("piva","")
-    tel     = client.get("telefono","")
-    txt(ML+5, y-26,  "F1", 9, C_BLK, f"Ragione Sociale: {rag_soc}")
-    txt(ML+5, y-38,  "F1", 9, C_BLK, f"Indirizzo: {addr}{('  -  ' + city) if city else ''}")
-    txt(ML+5, y-50,  "F1", 9, C_BLK, f"P.IVA: {piva}   Tel: {tel}")
+    def txtC(x, w, y, font, size, rgb, s):
+        approx_w = len(str(s)) * size * 0.50
+        tx = x + max(2, (w - approx_w) / 2)
+        txt(tx, y, font, size, rgb, s)
 
-    # ─── MESE/ANNO ───────────────────────────────────────
-    y -= bh + 10
-    txt((W//2)-60, y, "F2", 18, C_BLK, mese_anno)
-    y -= 6
-    hrule(y, 0.8)
+    def txtR(x, y, font, size, rgb, s):
+        approx_w = len(str(s)) * size * 0.50
+        txt(x - approx_w, y, font, size, rgb, s)
 
-    # ─── BOX TEMPERATURE DI RIFERIMENTO ──────────────────
-    y -= 12
-    bref = 28
-    rect(ML, y-bref, W-ML-MR, bref, "0.9 0.95 1.0")
-    rect(ML, y-bref, W-ML-MR, bref, C_BLK, False)
-    txt(ML+5, y-12, "F2", 8, C_BLK, "TEMPERATURE DI RIFERIMENTO:")
-    ref_line = ("Prodotti Freschi: 0 grC / +4 grC   |   "
-                "Prodotti Surgelati: -18 grC (+-3 grC)   |   "
-                "Prodotti Congelati: -12 grC")
-    txt(ML+5, y-24, "F1", 8, "0.1 0.1 0.5", ref_line)
+    # ── Client data ──
+    addr  = client.get("indirizzo","")
+    cap   = client.get("cap",""); citta = client.get("citta",""); prov = client.get("provincia","")
+    city  = " - ".join(filter(None,[cap,citta,prov]))
+    piva  = client.get("piva",""); tel = client.get("telefono",""); email = client.get("email","")
+    resp  = client.get("resp_haccp","")
+    sensori_list = client.get("sensori",[{"eui":client.get("eui","")}])
+    sensori_str  = " | ".join(s.get("nome_frigo",s.get("eui","")[-6:])
+                               for s in sensori_list if s.get("eui",""))
+    eui_str      = " | ".join(s.get("eui","") for s in sensori_list if s.get("eui",""))
 
-    # ─── INTESTAZIONE TABELLA ────────────────────────────
-    y -= bref + 8
-    ROW_H  = 16
-    # Colonne: Giorno | Ora | Sensore | Temperatura | Umidita | Note/Anomalie | Azioni correttive
-    CW = [38, 32, 65, 55, 42, 120, 120]  # larghezze
-    LABELS = ["Giorno","Ora","Sensore","Temp. (grC)","Umid. (%)","Note / Anomalie","Azioni Correttive"]
-    cx = ML
-    rect(ML, y-ROW_H, W-ML-MR, ROW_H, C_LGR)
-    rect(ML, y-ROW_H, W-ML-MR, ROW_H, C_BLK, False)
-    for i,(lbl,cw) in enumerate(zip(LABELS, CW)):
-        txt(cx+2, y-12, "F2", 7, C_BLK, lbl)
-        if i < len(CW)-1:
-            line(cx+cw, y, cx+cw, y-ROW_H, 0.3)
+    y = TM
+
+    # ── TITOLO ──
+    filledbox(LM, y-28, TW, 30, DBLUE)
+    txt(LM+6, y-18, "F2", 12, WHITE, "REGISTRO CONTROLLO TEMPERATURE FRIGORIFERI")
+    txt(LM+6, y-26, "F1",  8, "0.75 0.85 1.0", "Sistema HACCP - Conformita al D.Lgs. 193/2007")
+    y -= 32
+
+    # ── ANAGRAFICA ──
+    bh = 76
+    filledbox(LM, y-bh, TW, bh, VLGRY)
+    strokedbox(LM, y-bh, TW, bh)
+    filledbox(LM, y-13, TW, 14, "0.82 0.82 0.82")
+    txt(LM+4, y-10, "F2", 8, BLACK, "DATI OPERATORE / STABILIMENTO")
+    ls = 11
+    col1 = LM+4; col2 = LM+TW//2+4
+    txt(col1, y-10-ls,   "F1", 8, BLACK, f"Ragione Sociale: {nome}")
+    txt(col1, y-10-ls*2, "F1", 8, BLACK, f"Indirizzo: {addr}")
+    txt(col1, y-10-ls*3, "F1", 8, BLACK, f"Localita: {city}")
+    txt(col1, y-10-ls*4, "F1", 8, BLACK, f"P.IVA: {piva}   Tel: {tel}")
+    txt(col1, y-10-ls*5, "F1", 8, BLACK, f"EUI Sensore/i: {eui_str}")
+    txt(col2, y-10-ls,   "F1", 8, BLACK, f"Email: {email}")
+    txt(col2, y-10-ls*2, "F1", 8, BLACK, f"Responsabile HACCP: {resp}")
+    txt(col2, y-10-ls*3, "F1", 8, BLACK, f"Frigorifero/i: {sensori_str}")
+    txt(col2, y-10-ls*4, "F1", 8, BLACK, f"Tipo registro: {tipo.capitalize()}")
+    vline(LM+TW//2, y-bh+4, y-14, 0.4, LGREY)
+    y -= bh+4
+
+    # ── MESE/ANNO ──
+    txtC(LM, TW, y-14, "F2", 16, DBLUE, mese_anno)
+    hline(y-18, lw=1.0, rgb=LGREY)
+    y -= 22
+
+    # ── TEMP RIFERIMENTO ──
+    tbh = 22
+    filledbox(LM, y-tbh, TW, tbh, LBLUE)
+    strokedbox(LM, y-tbh, TW, tbh, "0.6 0.7 0.9")
+    txt(LM+5, y-9,  "F2", 8, DBLUE, "TEMPERATURE DI RIFERIMENTO:")
+    txt(LM+5, y-18, "F1", 7, DBLUE,
+        "Prodotti Freschi: 0/+4 grC   |   Prodotti Surgelati: -18 grC (+-3 grC)   |   Prodotti Congelati: -12 grC")
+    y -= tbh+4
+
+    # ── TABLE HEADER ──
+    filledbox(LM, y-RH, TW, RH, DBLUE)
+    cx = LM
+    for i,(lbl,cw) in enumerate(zip(CLBLS,COLS)):
+        txtC(cx, cw, y-12, "F2", 7, WHITE, lbl)
+        if i < len(COLS)-1:
+            vline(cx+cw, y-RH, y, 0.5, "0.4 0.5 0.7")
         cx += cw
+    table_top = y
+    y -= RH
 
-    # ─── RIGHE DATI ──────────────────────────────────────
+    # ── TABLE ROWS ──
     for ri, row in enumerate(rows_4h):
-        y -= ROW_H
-        if y < 90:
-            break
-        bg = C_VLG if ri % 2 == 0 else "1 1 1"
-        # Evidenzia allarmi
+        if y-RH < BM+85: break
+        bg = "0.97 0.97 0.97" if ri%2==0 else WHITE
         T_val = row.get("T")
-        _si_obj = row.get("_sens", {})
-        t_min = _si_obj.get("t_min") if isinstance(_si_obj, dict) else None
-        t_max = _si_obj.get("t_max") if isinstance(_si_obj, dict) else None
-        alarm = (T_val is not None and (
-            (t_min is not None and T_val < t_min) or
-            (t_max is not None and T_val > t_max)))
-        if alarm: bg = "1 0.85 0.85"
-        rect(ML, y-ROW_H+1, W-ML-MR, ROW_H-1, bg)
-        # border
-        line(ML, y-ROW_H+1, W-MR, y-ROW_H+1, 0.2, C_LGR)
-
+        _so   = row.get("_sens",{})
+        t_min = _so.get("t_min") if isinstance(_so,dict) else None
+        t_max = _so.get("t_max") if isinstance(_so,dict) else None
+        alarm = (T_val is not None and
+                 ((t_min is not None and T_val<t_min) or
+                  (t_max is not None and T_val>t_max)))
+        if alarm: bg = "1.0 0.88 0.88"
+        filledbox(LM, y-RH, TW, RH, bg)
+        hline(y-RH, lw=0.2, rgb=LGREY)
         vals = [
-            row.get("giorno",""),
-            row.get("ora",""),
-            row.get("sensore",""),
+            row.get("giorno",""), row.get("ora",""), row.get("sensore",""),
             fmt(T_val) if T_val is not None else "",
             fmt(row.get("H"),0) if row.get("H") is not None else "",
-            "",  # Note (vuoto, compilato a mano)
-            "",  # Azioni (vuoto, compilato a mano)
+            "", "",
         ]
-        cx = ML
-        for i,(v,cw) in enumerate(zip(vals, CW)):
-            col = C_RED if (alarm and i==3) else C_BLK
-            txt(cx+2, y-12, "F1", 8, col, v)
-            if i < len(CW)-1:
-                line(cx+cw, y, cx+cw, y-ROW_H+1, 0.2, C_GRY)
+        cx = LM
+        for i,(v,cw) in enumerate(zip(vals,COLS)):
+            col = RED if (alarm and i==3) else BLACK
+            if i <= 2: txt(cx+3, y-12, "F1", 8, col, v)
+            else: txtC(cx, cw, y-12, "F1", 8, col, v)
+            if i < len(COLS)-1: vline(cx+cw, y-RH, y, 0.2, LGREY)
             cx += cw
+        y -= RH
 
-    # ─── FOOTER FIRME ────────────────────────────────────
-    fy = 75
-    hrule(fy+2, 0.8)
-    # Sinistra
-    txt(ML, fy-8,  "F1", 8, C_BLK, "Data compilazione: ___/___/_______")
-    txt(ML, fy-22, "F1", 8, C_BLK, "Firma Responsabile HACCP: _________________________")
-    # Destra
-    rx = W//2 + 10
-    txt(rx, fy-8,  "F1", 8, C_BLK, "Data controllo ASL: ___/___/_______")
-    txt(rx, fy-22, "F1", 8, C_BLK, "Firma Ispettore ASL: _________________________")
+    # Table outer border
+    strokedbox(LM, y, TW, table_top-y, LGREY, 0.5)
 
-    # ─── NOTA IMPORTANTE ─────────────────────────────────
-    hrule(fy-30, 0.5)
-    nota = ("NOTA IMPORTANTE: Questo registro deve essere conservato per almeno 12 mesi dalla data di compilazione. "
-            "In caso di temperature fuori norma, annotare immediatamente le azioni correttive e informare il Responsabile HACCP.")
-    txt(ML, fy-42, "F1", 7, C_GRY, nota)
+    # ── FIRME ──
+    fy = BM+58
+    hline(fy+2, lw=0.8, rgb=LGREY)
+    resp_l = f"Firma Resp. HACCP ({resp}): " if resp else "Firma Responsabile HACCP: "
+    txt(LM,            fy-8,  "F1", 8, BLACK, "Data compilazione: _____ / _____ / _________")
+    txt(LM,            fy-22, "F1", 8, BLACK, resp_l+"_____________________________")
+    rx = LM+TW//2+10
+    txt(rx,            fy-8,  "F1", 8, BLACK, "Data controllo ASL: _____ / _____ / _________")
+    txt(rx,            fy-22, "F1", 8, BLACK, "Firma Ispettore ASL: __________________________")
 
-    # ─── PIEDE PAGINA ────────────────────────────────────
-    txt(ML,      fy-55, "F1", 6, C_GRY, "MyMine Srl  -  P.IVA IT12038850967  -  info@mymine.io  -  Sistema HACCP IoT")
-    txt(W-MR-40, fy-55, "F1", 6, C_GRY, "Pag. 1/1")
+    # ── NOTA ──
+    ny = BM+30
+    hline(ny+2, lw=0.4, rgb=LGREY)
+    txt(LM,     ny-6, "F2", 7, DGREY, "NOTA IMPORTANTE:")
+    txt(LM+80,  ny-6, "F1", 7, DGREY,
+        "Conservare per almeno 12 mesi. In caso di temperature fuori norma annotare azioni correttive e informare il Responsabile HACCP.")
 
-    # ─── ASSEMBLE PDF ────────────────────────────────────
-    stream_str   = "\n".join(ops)
-    stream_bytes = stream_str.encode("latin-1", errors="replace")
+    # ── FOOTER ──
+    txt(LM,       BM+10, "F1", 6, LGREY, "MyMine Srl  -  P.IVA IT12038850967  -  info@mymine.io  -  Sistema HACCP IoT")
+    txtR(PW-RM,   BM+10, "F1", 6, LGREY, "Pag. 1/1")
 
+    # ── PDF ASSEMBLY ──
+    stream_bytes = "\n".join(ops).encode("latin-1", errors="replace")
     objs = []
-    def obj(n, header, payload=None):
-        objs.append((n, header, payload))
-
+    def obj(n, hdr, payload=None): objs.append((n, hdr, payload))
     obj(1, "<< /Type /Catalog /Pages 2 0 R >>")
     obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-    obj(3, (f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {W} {H}] "
+    obj(3, (f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PW} {PH}] "
             f"/Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>"))
     obj(4, f"<< /Length {len(stream_bytes)} >>", stream_bytes)
     obj(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     obj(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
 
-    buf     = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
+    buf = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
     offsets = {}
-    for num, header, payload in objs:
+    for num, hdr, payload in objs:
         offsets[num] = len(buf)
-        buf += f"{num} 0 obj\n{header}\n".encode()
+        buf += f"{num} 0 obj\n{hdr}\n".encode()
         if payload is not None:
             buf += b"stream\n" + payload + b"\nendstream\n"
         buf += b"endobj\n"
-
-    xref_pos = len(buf)
-    n_objs   = len(objs) + 1
-    buf += f"xref\n0 {n_objs}\n0000000000 65535 f \n".encode()
-    for i in range(1, n_objs):
+    xp = len(buf); no = len(objs)+1
+    buf += f"xref\n0 {no}\n0000000000 65535 f \n".encode()
+    for i in range(1, no):
         buf += f"{offsets[i]:010d} 00000 n \n".encode()
-    buf += (f"trailer\n<< /Size {n_objs} /Root 1 0 R >>\n"
-            f"startxref\n{xref_pos}\n%%EOF\n").encode()
+    buf += f"trailer\n<< /Size {no} /Root 1 0 R >>\nstartxref\n{xp}\n%%EOF\n".encode()
     return bytes(buf)
-
 
 
 def send_email(to_addr, subject, body_html):
@@ -1344,6 +1361,7 @@ input:checked+.slider::before{transform:translateX(16px)}
     <div class="field"><label>Telefono</label><input id="fTel" type="tel" placeholder="+39 333 1234567"></div>
     <div class="divider"></div>
     <div class="field"><label>Indirizzo installazione</label><input id="fAddr" placeholder="Via Roma, 1"></div>
+    <div class="field"><label>Responsabile HACCP</label><input id="fRespHaccp" placeholder="Mario Rossi"></div>
     <div class="row4">
       <div class="field"><label>CAP</label><input id="fCap" placeholder="20100" maxlength="5"></div>
       <div class="field"><label>Città</label><input id="fCitta" placeholder="Milano"></div>
@@ -1475,6 +1493,7 @@ async function addClient(){
   const payload={
     nome,cognome,piva:g('fPiva'),email:g('fEmail'),telefono:g('fTel'),
     indirizzo:g('fAddr'),
+    resp_haccp:g('fRespHaccp'),
     cap:g('fCap'), citta:g('fCitta'), provincia:g('fProv').toUpperCase(),
     eui:sensori[0].eui,
     sensori:sensori,
@@ -1499,7 +1518,7 @@ async function addClient(){
     return;
   }
   // Reset form
-  ['fNome','fCognome','fPiva','fEmail','fTel','fAddr','fCap','fCitta','fProv']
+  ['fNome','fCognome','fPiva','fEmail','fTel','fAddr','fRespHaccp','fCap','fCitta','fProv']
     .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('sensoriList').innerHTML='';
   addSensoreRow();
@@ -1606,6 +1625,7 @@ async function editClient(i){
   g('fEmail').value=c.email||'';
   g('fTel').value=c.telefono||'';
   g('fAddr').value=c.indirizzo||'';
+  g('fRespHaccp').value=c.resp_haccp||'';
   g('fCap').value=c.cap||'';
   g('fCitta').value=c.citta||'';
   g('fProv').value=c.provincia||'';
@@ -1633,6 +1653,7 @@ async function updateClient(idx){
   const body={
     cognome:g('fCognome'), nome:g('fNome'), piva:g('fPiva'),
     email:g('fEmail'), telefono:g('fTel'), indirizzo:g('fAddr'),
+    resp_haccp:g('fRespHaccp'),
     cap:g('fCap'), citta:g('fCitta'), provincia:g('fProv').toUpperCase(),
     sensori:_sensori, eui:_sensori.length>0?_sensori[0].eui:'',
     notif_email:document.getElementById('fNotifEmail').checked,
