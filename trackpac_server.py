@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 13:41:58'
+BUILD_TS    = '2026-03-17 13:50:25'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1357,6 +1357,7 @@ input:checked+.slider::before{transform:translateX(16px)}
       <div class="field"><label>Nome</label><input id="fNome" placeholder="Mario"></div>
       <div class="field"><label>Cognome</label><input id="fCognome" placeholder="Rossi"></div>
     </div>
+    <div class="field"><label>Ragione Sociale</label><input id="fRagSoc" placeholder="Pizzeria Roma Srl (opzionale)"></div>
     <div class="field"><label>Partita IVA</label><input id="fPiva" placeholder="IT01234567890"></div>
     <div class="field"><label>Email</label><input id="fEmail" type="email" placeholder="mario.rossi@azienda.it"></div>
     <div class="field"><label>Telefono</label><input id="fTel" type="tel" placeholder="+39 333 1234567"></div>
