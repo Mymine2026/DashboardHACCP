@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 14:21:58'
+BUILD_TS    = '2026-03-17 14:25:21'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1881,6 +1881,7 @@ select:hover{border-color:var(--green);color:var(--text)}
 <div class="errbanner" id="err"></div>
 <div class="devstrip" id="dstrip">
   <div class="di"><label>Cliente</label><span id="dClient">—</span></div>
+  <div class="di" id="diRagSoc" style="display:none"><label>Ragione Sociale</label><span id="dRagSoc" style="color:var(--green2)">—</span></div>
   <div class="di"><label>Email</label><span id="dEmail">—</span></div>
   <div class="di"><label>Telefono</label><span id="dTel">—</span></div>
   <div class="di"><label>Indirizzo</label><span id="dAddr">—</span></div>
@@ -1952,6 +1953,9 @@ async function load(){
   // Read sensore
       document.getElementById('dstrip').style.display='flex';
       document.getElementById('dClient').textContent=(cd?.cognome+' '+cd?.nome)||'—';
+      const _rs=cd?.rag_soc||'';
+      document.getElementById('dRagSoc').textContent=_rs||'—';
+      document.getElementById('diRagSoc').style.display=_rs?'':'none';
       document.getElementById('dEmail').textContent=cd?.email||'—';
       document.getElementById('dTel').textContent=cd?.telefono||'—';
       document.getElementById('dAddr').textContent=cd?.indirizzo||'—';
