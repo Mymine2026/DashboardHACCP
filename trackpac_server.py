@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 13:28:47'
+BUILD_TS    = '2026-03-17 13:35:12'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -459,8 +459,8 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
     LGREY = "0.75 0.75 0.75"
     VLGRY = "0.93 0.93 0.93"
     WHITE = "1 1 1"
-    DBLUE = "0.05 0.15 0.40"
-    LBLUE = "0.88 0.91 0.97"
+    DBLUE = "0.05 0.40 0.25"   # MyMine dark green
+    LBLUE = "0.87 0.96 0.91"   # light green
     RED   = "0.75 0.05 0.05"
 
     # cols: Giorno|Ora|Sensore|Temp|Umid|Note|Azioni  — sum=525
@@ -516,23 +516,23 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
     y -= 32
 
     # ── ANAGRAFICA ──
-    bh = 76
+    bh = 68
     filledbox(LM, y-bh, TW, bh, VLGRY)
     strokedbox(LM, y-bh, TW, bh)
     filledbox(LM, y-13, TW, 14, "0.82 0.82 0.82")
-    txt(LM+4, y-10, "F2", 8, BLACK, "DATI OPERATORE / STABILIMENTO")
+    txt(LM+4, y-10, "F2", 8, BLACK, "CLIENTE")
     ls = 11
     col1 = LM+4; col2 = LM+TW//2+4
     txt(col1, y-10-ls,   "F1", 8, BLACK, f"Ragione Sociale: {nome}")
     txt(col1, y-10-ls*2, "F1", 8, BLACK, f"Indirizzo: {addr}")
     txt(col1, y-10-ls*3, "F1", 8, BLACK, f"Localita: {city}")
     txt(col1, y-10-ls*4, "F1", 8, BLACK, f"P.IVA: {piva}   Tel: {tel}")
-    txt(col1, y-10-ls*5, "F1", 8, BLACK, f"EUI Sensore/i: {eui_str}")
+
     txt(col2, y-10-ls,   "F1", 8, BLACK, f"Email: {email}")
     txt(col2, y-10-ls*2, "F1", 8, BLACK, f"Responsabile HACCP: {resp}")
     txt(col2, y-10-ls*3, "F1", 8, BLACK, f"Frigorifero/i: {sensori_str}")
-    txt(col2, y-10-ls*4, "F1", 8, BLACK, f"Tipo registro: {tipo.capitalize()}")
-    vline(LM+TW//2, y-bh+4, y-14, 0.4, LGREY)
+    txt(col2, y-10-ls*4, "F1", 8, BLACK, f"EUI: {eui_str}")
+    vline(LM+TW//2, y-bh+5, y-14, 0.4, LGREY)
     y -= bh+4
 
     # ── MESE/ANNO ──
@@ -1385,7 +1385,7 @@ input:checked+.slider::before{transform:translateX(16px)}
         <span class="tlabel">Email al cliente</span>
       </div>
       <div class="notif-row">
-        <label class="toggle"><input type="checkbox" id="fNotifSms"><span class="slider"></span></label>
+        <label class="toggle"><input type="checkbox" id="fNotifSms" checked><span class="slider"></span></label>
         <span class="tlabel">SMS (SMSAPI)</span>
       </div>
     </div>
@@ -1485,13 +1485,12 @@ function getSensori(){
 // ─── ADD CLIENT ─────────────────────────────────────────────────
 async function addClient(){
   const nome=document.getElementById('fNome').value.trim();
-  const cognome=document.getElementById('fCognome').value.trim();
   const sensori=getSensori();
-  if(!nome||!cognome){alert('Inserisci nome e cognome');return;}
+  if(!nome){alert('Inserisci la ragione sociale');return;}
   if(sensori.length===0){alert('Aggiungi almeno un frigorifero con il suo codice EUI sensore');return;}
   const g=id=>document.getElementById(id).value.trim();
   const payload={
-    nome,cognome,piva:g('fPiva'),email:g('fEmail'),telefono:g('fTel'),
+    nome,cognome:nome,piva:g('fPiva'),email:g('fEmail'),telefono:g('fTel'),
     indirizzo:g('fAddr'),
     resp_haccp:g('fRespHaccp'),
     cap:g('fCap'), citta:g('fCitta'), provincia:g('fProv').toUpperCase(),
@@ -1518,12 +1517,12 @@ async function addClient(){
     return;
   }
   // Reset form
-  ['fNome','fCognome','fPiva','fEmail','fTel','fAddr','fRespHaccp','fCap','fCitta','fProv']
+  ['fNome','fPiva','fEmail','fTel','fAddr','fRespHaccp','fCap','fCitta','fProv']
     .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('sensoriList').innerHTML='';
   addSensoreRow();
   document.getElementById('fNotifEmail').checked=true;
-  document.getElementById('fNotifSms').checked=false;
+  document.getElementById('fNotifSms').checked=true;
   const nl=String.fromCharCode(10);
   fl('Cliente salvato! Credenziali: '+result.username+' / '+result.password);
   if(result.password){
@@ -1619,8 +1618,7 @@ async function editClient(i){
   if(!c)return;
   // Populate form with existing data
   const g=id=>document.getElementById(id);
-  g('fNome').value=c.nome||'';
-  g('fCognome').value=c.cognome||'';
+  g('fNome').value=c.nome||(c.cognome?c.cognome+(c.nome?' '+c.nome:''):'')||'';
   g('fPiva').value=c.piva||'';
   g('fEmail').value=c.email||'';
   g('fTel').value=c.telefono||'';
@@ -1651,7 +1649,7 @@ async function updateClient(idx){
   const g=id=>{const el=document.getElementById(id);return el?el.value.trim():'';}
   const _sensori=getSensori();
   const body={
-    cognome:g('fCognome'), nome:g('fNome'), piva:g('fPiva'),
+    cognome:g('fNome'), nome:g('fNome'), piva:g('fPiva'),
     email:g('fEmail'), telefono:g('fTel'), indirizzo:g('fAddr'),
     resp_haccp:g('fRespHaccp'),
     cap:g('fCap'), citta:g('fCitta'), provincia:g('fProv').toUpperCase(),
