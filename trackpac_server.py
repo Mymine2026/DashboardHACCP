@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 13:50:25'
+BUILD_TS    = '2026-03-17 14:06:10'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1398,7 +1398,8 @@ input:checked+.slider::before{transform:translateX(16px)}
     <div class="panel-title">Clienti registrati</div>
     <div class="panel-sub">Clicca per aprire la dashboard</div>
     <div style="display:flex;gap:7px;margin-bottom:10px;flex-wrap:wrap">
-      <a class="btn" href="/api/export" download="mymine_clienti_backup.json" style="font-size:11px;padding:6px 11px">⬇ Esporta clienti</a>
+      <a class="btn" href="/api/export" download="mymine_clienti_backup.json" style="font-size:11px;padding:6px 11px">⬇ Backup JSON</a>
+      <a class="btn" href="#" onclick="esportaXls(event)" style="font-size:11px;padding:6px 11px;background:var(--bg3);color:#1a6b2e">⬇ Esporta XLS</a>
       <label class="btn" style="cursor:pointer;font-size:11px;padding:6px 11px">⬆ Importa clienti<input type="file" accept=".json" id="importFile" style="display:none" onchange="importClienti(this)"></label>
     </div>
     <button class="btn-check" onclick="checkNow()" id="btnCheck">🔍 Controlla allarmi ora</button>
@@ -1554,7 +1555,7 @@ async function loadClients(){
       if(c.h_min!=null)ranges.push('Umid. min '+c.h_min+'%');
       if(c.h_max!=null)ranges.push('Umid. max '+c.h_max+'%');
       return`<div class="ccard${hasAlarm?' alarm':''}" onclick="go(${i})">
-          <div class="ccard-name">${c.cognome} ${c.nome}${badge}</div>
+          <div class="ccard-name">${c.cognome} ${c.nome}${badge}${c.rag_soc?'<span style="font-weight:400;font-size:12px;color:var(--sub);margin-left:8px">'+c.rag_soc+'</span>':''}</div>
         <div class="ccard-details">
           ${c.email?`✉ ${c.email}<br>`:''}${c.telefono?`📞 ${c.telefono}<br>`:''}
           P.IVA: ${c.piva||'—'} &nbsp;·&nbsp; 📍 ${c.indirizzo||'—'}<br>
@@ -1689,6 +1690,37 @@ async function importClienti(input){
   if(j.ok){fl('✓ Importati '+j.added+' nuovi, aggiornati '+j.updated+'. Totale: '+j.total+' clienti.');loadClients();}
   else{alert('Errore import: '+j.error);}
   input.value='';
+}
+function esportaXls(e){
+  e.preventDefault();
+  fetch('/api/clients').then(r=>r.json()).then(cls=>{
+    if(!cls.length){alert('Nessun cliente da esportare.');return;}
+    // Build CSV-like TSV that Excel opens natively
+    const COLS=['Cognome','Nome','Ragione Sociale','P.IVA','Email','Telefono',
+                'Indirizzo','CAP','Citta','Provincia','Resp. HACCP',
+                'Sensori (EUI)','Sensori (Nome)','Notif. Email','Notif. SMS',
+                'Username'];
+    const rows=[COLS];
+    cls.forEach(c=>{
+      const euiList=(c.sensori||[{eui:c.eui||'',nome_frigo:''}]).map(s=>s.eui||'').join(', ');
+      const nomeList=(c.sensori||[{eui:'',nome_frigo:c.nome_frigo||''}]).map(s=>s.nome_frigo||s.eui||'').join(', ');
+      rows.push([
+        c.cognome||'',c.nome||'',c.rag_soc||'',c.piva||'',c.email||'',
+        c.telefono||'',c.indirizzo||'',c.cap||'',c.citta||'',c.provincia||'',
+        c.resp_haccp||'',euiList,nomeList,
+        c.notif_email?'Si':'No',c.notif_sms?'Si':'No',
+        c.username||c.email||''
+      ]);
+    });
+    // BOM + CSV (semicolon for Italian Excel)
+    const csv='\uFEFF'+rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='mymine_clienti.csv';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }).catch(e=>alert('Errore export: '+e.message));
 }
 async function checkNow(){
   const b=document.getElementById('btnCheck');
