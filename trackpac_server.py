@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 13:35:12'
+BUILD_TS    = '2026-03-17 13:41:58'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -401,7 +401,8 @@ def generate_pdf_report(client, tipo="giornaliero"):
             dev = next((d for d in devs if (d.get("dev_eui","")).upper() == _eui), None)
             if not dev: continue
             dev_id = dev["id"]
-            nome   = (client.get("cognome","") + " " + client.get("nome","")).strip()
+            _rs = client.get("rag_soc","").strip()
+            nome = _rs if _rs else (client.get("cognome","") + " " + client.get("nome","")).strip()
             sname  = _s.get("nome_frigo", _eui[-6:])
 
             if tipo == "giornaliero":
@@ -1485,12 +1486,13 @@ function getSensori(){
 // ─── ADD CLIENT ─────────────────────────────────────────────────
 async function addClient(){
   const nome=document.getElementById('fNome').value.trim();
+  const cognome=document.getElementById('fCognome').value.trim();
   const sensori=getSensori();
-  if(!nome){alert('Inserisci la ragione sociale');return;}
+  if(!nome||!cognome){alert('Inserisci nome e cognome');return;}
   if(sensori.length===0){alert('Aggiungi almeno un frigorifero con il suo codice EUI sensore');return;}
   const g=id=>document.getElementById(id).value.trim();
   const payload={
-    nome,cognome:nome,piva:g('fPiva'),email:g('fEmail'),telefono:g('fTel'),
+    nome,cognome:g('fCognome'),rag_soc:g('fRagSoc'),piva:g('fPiva'),email:g('fEmail'),telefono:g('fTel'),
     indirizzo:g('fAddr'),
     resp_haccp:g('fRespHaccp'),
     cap:g('fCap'), citta:g('fCitta'), provincia:g('fProv').toUpperCase(),
@@ -1517,7 +1519,7 @@ async function addClient(){
     return;
   }
   // Reset form
-  ['fNome','fPiva','fEmail','fTel','fAddr','fRespHaccp','fCap','fCitta','fProv']
+  ['fNome','fCognome','fRagSoc','fPiva','fEmail','fTel','fAddr','fRespHaccp','fCap','fCitta','fProv']
     .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('sensoriList').innerHTML='';
   addSensoreRow();
@@ -1618,7 +1620,9 @@ async function editClient(i){
   if(!c)return;
   // Populate form with existing data
   const g=id=>document.getElementById(id);
-  g('fNome').value=c.nome||(c.cognome?c.cognome+(c.nome?' '+c.nome:''):'')||'';
+  g('fNome').value=c.nome||'';
+  g('fCognome').value=c.cognome||'';
+  g('fRagSoc').value=c.rag_soc||'';
   g('fPiva').value=c.piva||'';
   g('fEmail').value=c.email||'';
   g('fTel').value=c.telefono||'';
@@ -1649,7 +1653,7 @@ async function updateClient(idx){
   const g=id=>{const el=document.getElementById(id);return el?el.value.trim():'';}
   const _sensori=getSensori();
   const body={
-    cognome:g('fNome'), nome:g('fNome'), piva:g('fPiva'),
+    cognome:g('fCognome'), nome:g('fNome'), rag_soc:g('fRagSoc'), piva:g('fPiva'),
     email:g('fEmail'), telefono:g('fTel'), indirizzo:g('fAddr'),
     resp_haccp:g('fRespHaccp'),
     cap:g('fCap'), citta:g('fCitta'), provincia:g('fProv').toUpperCase(),
