@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-17 12:03:37'
+BUILD_TS    = '2026-03-17 12:07:25'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1427,24 +1427,45 @@ def send_sms(to_number, message):
             headers={"Authorization": f"Bearer {SMSAPI_TOKEN}",
                      "Content-Type":  "application/x-www-form-urlencoded"})
         with urllib.request.urlopen(req, timeout=20) as r:
-            resp = json.loads(r.read())
-        print(f"  [SMS] Risposta SMSAPI: {resp}")
-        # Controlla errori nella risposta
-        if isinstance(resp.get("error"), dict):
-            code = resp["error"].get("code","?")
-            msg  = resp["error"].get("message","?")
-            print(f"  [SMS] Errore SMSAPI {code}: {msg}")
-            if code == 14:
-                print(f"  [SMS] HINT: sender '{SMSAPI_SENDER}' non approvato — imposta SMSAPI_SENDER vuoto per usare 'Test'")
+            raw_resp = r.read()
+        print(f"  [SMS] Risposta SMSAPI raw: {raw_resp[:200]}")
+        try:
+            resp = json.loads(raw_resp)
+        except Exception:
+            resp = raw_resp.decode("utf-8","replace").strip()
+        # SMSAPI può restituire: intero (codice errore), dict con error/list, o stringa
+        SMSAPI_ERRORS = {
+            1:"Autorizzazione non valida",2:"Autorizzazione non valida",
+            4:"Credito insufficiente",8:"Numero di telefono non valido",
+            13:"Sender non trovato",14:"Sender non approvato — usa SMSAPI_SENDER=Test o approva il sender",
+            101:"Token non valido o scaduto — rigenera su smsapi.com > OAuth Tokens",
+            103:"Indirizzo IP non autorizzato",
+        }
+        if isinstance(resp, int):
+            msg = SMSAPI_ERRORS.get(resp, f"Codice errore sconosciuto: {resp}")
+            print(f"  [SMS] Errore SMSAPI {resp}: {msg}")
             return False
-        if resp.get("invalid_numbers"):
-            print(f"  [SMS] Numero non valido: {phone}")
-            return False
-        lst    = resp.get("list", [{}])
-        sid    = lst[0].get("id","?") if lst else "?"
-        status = lst[0].get("status","?") if lst else "?"
-        print(f"  [SMS] OK to={phone} id={sid} status={status}")
-        return True
+        if isinstance(resp, dict):
+            err = resp.get("error")
+            if err:
+                if isinstance(err, dict):
+                    code = err.get("code","?"); emsg = err.get("message", SMSAPI_ERRORS.get(code,"?"))
+                elif isinstance(err, int):
+                    code = err; emsg = SMSAPI_ERRORS.get(code, f"Codice {code}")
+                else:
+                    code = "?"; emsg = str(err)
+                print(f"  [SMS] Errore SMSAPI {code}: {emsg}")
+                return False
+            if resp.get("invalid_numbers"):
+                print(f"  [SMS] Numero non valido: {phone}")
+                return False
+            lst    = resp.get("list") or [{}]
+            sid    = lst[0].get("id","?") if lst else "?"
+            status = lst[0].get("status","?") if lst else "?"
+            print(f"  [SMS] OK to={phone} id={sid} status={status}")
+            return True
+        print(f"  [SMS] Risposta inattesa: {resp}")
+        return False
     except urllib.error.HTTPError as e:
         bd = e.read().decode()
         print(f"  [SMS] HTTP {e.code}: {bd[:300]}")
@@ -1952,17 +1973,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             "Content-Type": "application/x-www-form-urlencoded"
                         })
                         with urllib.request.urlopen(req_t, timeout=20) as r_t:
-                            resp_t = json.loads(r_t.read())
-                        if resp_t.get("invalid_numbers"):
-                            result["sms"] = {"ok": False, "error": f"Numero non valido: {phone_n}", "raw": str(resp_t)}
-                        elif resp_t.get("error"):
-                            ec = resp_t["error"].get("code","?"); em = resp_t["error"].get("message","?")
-                            result["sms"] = {"ok": False, "error": f"SMSAPI error {ec}: {em}"}
-                        else:
-                            lst_t = resp_t.get("list",[{}])
+                            raw_t = r_t.read()
+                        try: resp_t = json.loads(raw_t)
+                        except: resp_t = raw_t.decode("utf-8","replace").strip()
+                        ERRS = {1:"Auth non valida",4:"Credito insufficiente",8:"Numero non valido",
+                                13:"Sender non trovato",14:"Sender non approvato — prova SMSAPI_SENDER=Test",
+                                101:"Token non valido — rigenera su smsapi.com > OAuth Tokens"}
+                        if isinstance(resp_t, int):
+                            result["sms"] = {"ok": False, "error": f"SMSAPI errore {resp_t}: {ERRS.get(resp_t, 'codice sconosciuto')}"}
+                        elif isinstance(resp_t, dict) and resp_t.get("error"):
+                            err_t = resp_t["error"]
+                            if isinstance(err_t, int): ec,em = err_t, ERRS.get(err_t,"?")
+                            elif isinstance(err_t, dict): ec,em = err_t.get("code","?"),err_t.get("message","?")
+                            else: ec,em = "?", str(err_t)
+                            result["sms"] = {"ok": False, "error": f"SMSAPI errore {ec}: {em}"}
+                        elif isinstance(resp_t, dict) and resp_t.get("list"):
+                            lst_t = resp_t["list"]
                             result["sms"] = {"ok": True, "to": phone_n,
                                 "id": lst_t[0].get("id","?"), "status": lst_t[0].get("status","?")}
                             print(f"  [TEST] ✓ SMS inviato a {phone_n}")
+                        else:
+                            result["sms"] = {"ok": False, "error": f"Risposta inattesa: {str(resp_t)[:200]}"}
                     except urllib.error.HTTPError as e_t:
                         bd_t = e_t.read().decode()
                         result["sms"] = {"ok": False, "error": f"HTTP {e_t.code}: {bd_t[:200]}"}
