@@ -5,7 +5,8 @@ WORKDIR /app
 COPY trackpac_server.py .
 COPY sensori.txt .
 
-RUN mkdir -p /app/data && chmod 777 /app/data
+RUN pip install --no-cache-dir psycopg2-binary && \
+    mkdir -p /app/data && chmod 777 /app/data
 
 ENV PORT=3000
 ENV PYTHONUNBUFFERED=1
