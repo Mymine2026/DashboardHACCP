@@ -214,7 +214,7 @@
     box-shadow: 0 0 0 3px rgba(29,181,132,.12);
   }
 
-  .field input.error {
+  .field input.error, .field select.error {
     border-color: var(--red);
     box-shadow: 0 0 0 3px rgba(224,82,82,.10);
   }
@@ -498,7 +498,56 @@
 
       <div class="divider"></div>
 
-      <!-- SECTION 4: HACCP -->
+      <!-- SECTION 4: Frigorifero -->
+      <div class="sep-label"><span>Frigorifero da monitorare</span></div>
+
+      <div class="row2" style="margin-bottom:14px">
+        <div class="field">
+          <label>Tipo di prodotto <span style="color:var(--red)">*</span></label>
+          <select id="fTipoFrigo" onchange="aggiornaToglie()">
+            <option value="">— Seleziona —</option>
+            <option value="Prodotti Freschi">Prodotti Freschi (0/+4 °C)</option>
+            <option value="Prodotti Surgelati">Prodotti Surgelati (-18 °C ±3)</option>
+            <option value="Prodotti Congelati">Prodotti Congelati (-12 °C)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Nome frigorifero <span style="color:var(--red)">*</span></label>
+          <input id="fNomeFrigo" type="text" placeholder="es. Magazzino, Retro, Banco...">
+        </div>
+      </div>
+
+      <div id="soglieBox" style="display:none">
+        <div class="info-box" id="soglieInfo" style="margin-bottom:14px">
+          <div class="icon">&#127777;</div>
+          <div id="soglieInfoTesto"></div>
+        </div>
+        <div class="row2" style="margin-bottom:14px">
+          <div class="field">
+            <label>Temperatura minima (°C)</label>
+            <input id="fTMin" type="number" step="0.5" placeholder="es. 0">
+          </div>
+          <div class="field">
+            <label>Temperatura massima (°C) <span style="color:var(--red)">*</span></label>
+            <input id="fTMax" type="number" step="0.5" placeholder="es. 4">
+            <div class="hint">Superata questa soglia riceverai un allarme</div>
+          </div>
+        </div>
+        <div class="row2" style="margin-bottom:6px">
+          <div class="field">
+            <label>Umidità minima (%) <span class="opt">facoltativo</span></label>
+            <input id="fHMin" type="number" step="1" min="0" max="100" placeholder="es. 60">
+          </div>
+          <div class="field">
+            <label>Umidità massima (%) <span class="opt">facoltativo</span></label>
+            <input id="fHMax" type="number" step="1" min="0" max="100" placeholder="es. 90">
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- SECTION 5: HACCP -->
       <div class="sep-label"><span>Responsabile HACCP</span></div>
 
       <div class="info-box">
@@ -537,7 +586,7 @@
 <script>
 // ── CONFIG ─────────────────────────────────────────────────────────────────
 // Sostituisci con l'URL del tuo webhook n8n
-const N8N_WEBHOOK_URL = 'https://n8n.mymine.cloud/webhook/mymine-onboarding';
+const N8N_WEBHOOK_URL = 'https://TUO-N8N-HOST/webhook/mymine-onboarding';
 // ───────────────────────────────────────────────────────────────────────────
 
 function g(id) { return document.getElementById(id); }
@@ -546,6 +595,12 @@ function setError(id, on) { g(id).classList.toggle('error', on); }
 
 function validate() {
   const required = ['fNome','fCognome','fRagSoc','fPiva','fEmail','fTel','fAddr','fCap','fCitta'];
+  // Fridge fields
+  const tipoFrigo = val('fTipoFrigo');
+  const nomeFrigo = val('fNomeFrigo');
+  if (!tipoFrigo) { setError('fTipoFrigo', true); ok = false; }
+  if (!nomeFrigo) { setError('fNomeFrigo', true); ok = false; }
+  if (tipoFrigo && !val('fTMax')) { setError('fTMax', true); ok = false; }
   let ok = true;
   required.forEach(function(id) {
     const v = val(id);
@@ -562,6 +617,27 @@ function validate() {
   return ok;
 }
 
+// Temperature presets per type
+var PRESETS = {
+  'Prodotti Freschi':   { t_min:  0,   t_max:  4,   info: 'Intervallo consigliato: 0°C / +4°C. Riceverai un allarme se supera +4°C.' },
+  'Prodotti Surgelati': { t_min: -21,  t_max: -15,  info: 'Intervallo consigliato: -18°C (±3°C). Allarme se supera -15°C.' },
+  'Prodotti Congelati': { t_min: null, t_max: -12,  info: 'Temperatura massima consigliata: -12°C. Allarme se supera -12°C.' }
+};
+
+function aggiornaToglie() {
+  var tipo = val('fTipoFrigo');
+  var box  = g('soglieBox');
+  if (!tipo) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  var p = PRESETS[tipo];
+  if (p) {
+    if (p.t_min !== null) g('fTMin').value = p.t_min;
+    else g('fTMin').value = '';
+    g('fTMax').value = p.t_max;
+    g('soglieInfoTesto').textContent = p.info;
+  }
+}
+
 async function submitForm() {
   if (!validate()) {
     g('msgBox').className = 'error';
@@ -573,6 +649,18 @@ async function submitForm() {
   btn.disabled = true;
   btn.classList.add('loading');
   g('msgBox').style.display = 'none';
+
+  // Build nome_frigo as "Tipo - Nome" for MyMine dashboard
+  const tipoFrigo = val('fTipoFrigo');
+  const nomeFrigo = val('fNomeFrigo');
+  const nomeFrigoCompleto = tipoFrigo && nomeFrigo
+    ? tipoFrigo + ' - ' + nomeFrigo
+    : nomeFrigo || tipoFrigo || 'Frigo 1';
+
+  const tMin = val('fTMin') !== '' ? parseFloat(val('fTMin')) : null;
+  const tMax = val('fTMax') !== '' ? parseFloat(val('fTMax')) : null;
+  const hMin = val('fHMin') !== '' ? parseFloat(val('fHMin')) : null;
+  const hMax = val('fHMax') !== '' ? parseFloat(val('fHMax')) : null;
 
   const payload = {
     nome:        val('fNome'),
@@ -586,12 +674,13 @@ async function submitForm() {
     citta:       val('fCitta'),
     provincia:   val('fProv').toUpperCase(),
     resp_haccp:  val('fRespHaccp') || val('fNome') + ' ' + val('fCognome'),
-    // Sensore placeholder — sarà aggiunto da MyMine in dashboard
     sensori: [{
-      eui: 'DA_CONFIGURARE',
-      nome_frigo: 'Frigo 1',
-      t_min: 0, t_max: 4,
-      h_min: null, h_max: null
+      eui:        'DA_CONFIGURARE',
+      nome_frigo: nomeFrigoCompleto,
+      t_min:      tMin,
+      t_max:      tMax,
+      h_min:      hMin,
+      h_max:      hMax
     }],
     notif_email: true,
     notif_sms:   false
@@ -624,6 +713,11 @@ async function submitForm() {
 }
 
 // Clear error on input
+document.querySelectorAll('select').forEach(function(sel) {
+  sel.addEventListener('change', function() {
+    sel.classList.remove('error');
+  });
+});
 document.querySelectorAll('input').forEach(function(inp) {
   inp.addEventListener('input', function() {
     inp.classList.remove('error');
