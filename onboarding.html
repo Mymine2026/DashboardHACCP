@@ -586,7 +586,7 @@
 <script>
 // ── CONFIG ─────────────────────────────────────────────────────────────────
 // Sostituisci con l'URL del tuo webhook n8n
-const N8N_WEBHOOK_URL = 'https://TUO-N8N-HOST/webhook/mymine-onboarding';
+const N8N_WEBHOOK_URL = 'https://n8n.mymine.cloud/webhook/mymine-onboarding';
 // ───────────────────────────────────────────────────────────────────────────
 
 function g(id) { return document.getElementById(id); }
@@ -594,26 +594,24 @@ function val(id) { return (g(id).value || '').trim(); }
 function setError(id, on) { g(id).classList.toggle('error', on); }
 
 function validate() {
-  const required = ['fNome','fCognome','fRagSoc','fPiva','fEmail','fTel','fAddr','fCap','fCitta'];
-  // Fridge fields
-  const tipoFrigo = val('fTipoFrigo');
-  const nomeFrigo = val('fNomeFrigo');
-  if (!tipoFrigo) { setError('fTipoFrigo', true); ok = false; }
-  if (!nomeFrigo) { setError('fNomeFrigo', true); ok = false; }
-  if (tipoFrigo && !val('fTMax')) { setError('fTMax', true); ok = false; }
   let ok = true;
+  const required = ['fNome','fCognome','fRagSoc','fPiva','fEmail','fTel','fAddr','fCap','fCitta'];
   required.forEach(function(id) {
-    const v = val(id);
-    const empty = !v;
+    const empty = !val(id);
     setError(id, empty);
     if (empty) ok = false;
   });
   // Email format
   const email = val('fEmail');
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    setError('fEmail', true);
-    ok = false;
+    setError('fEmail', true); ok = false;
   }
+  // Frigo obbligatorio
+  const tipoFrigo = val('fTipoFrigo');
+  const nomeFrigo = val('fNomeFrigo');
+  if (!tipoFrigo) { setError('fTipoFrigo', true); ok = false; }
+  if (!nomeFrigo) { setError('fNomeFrigo', true); ok = false; }
+  if (tipoFrigo && !val('fTMax')) { setError('fTMax', true); ok = false; }
   return ok;
 }
 
