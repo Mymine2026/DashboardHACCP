@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-18 09:45:28'
+BUILD_TS    = '2026-03-19 10:44:05'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -218,6 +218,42 @@ def load_sensori():
             except Exception: pass
             break
     return sensori
+
+def _update_sensori_file(clients):
+    """Aggiorna sensori.txt aggiungendo la colonna con il cliente assegnato."""
+    try:
+        # Mappa EUI → nome cliente
+        assigned = {}
+        for c in clients:
+            nome_c = (c.get("rag_soc","") or
+                      (c.get("cognome","")+" "+c.get("nome",""))).strip()
+            for s in c.get("sensori",[{"eui":c.get("eui","")}]):
+                eui_s = (s.get("eui","") or "").upper()
+                if eui_s and eui_s != "DA_CONFIGURARE":
+                    assigned[eui_s] = nome_c
+
+        # Leggi file attuale
+        for path in [SENSORI_FILE, _os.path.join(_DATA_DIR, "sensori.txt")]:
+            if _os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    lines = f.readlines()
+                new_lines = []
+                for line in lines:
+                    stripped = line.strip().replace(chr(13),"")
+                    if not stripped or stripped.startswith("#"):
+                        new_lines.append(line)
+                        continue
+                    parts = stripped.split("\t")
+                    eui  = parts[0].strip().upper()
+                    desc = parts[1].strip() if len(parts) > 1 else eui
+                    cliente = assigned.get(eui, "")
+                    new_lines.append(eui + "\t" + desc + "\t" + cliente + "\n")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.writelines(new_lines)
+                print(f"  [SENSORI] sensori.txt aggiornato ({len(assigned)} assegnati)")
+                return
+    except Exception as e:
+        print(f"  [SENSORI] Errore aggiornamento sensori.txt: {e}")
 
 def get_client_sensor(client, idx=0):
     sensori = client.get("sensori", [])
@@ -1373,10 +1409,6 @@ input:checked+.slider::before{transform:translateX(16px)}
     <div id="sensoriList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
       <button type="button" onclick="addSensoreRow()" style="background:var(--bg3);border:1px solid var(--line2);color:var(--green2);border-radius:8px;padding:7px 14px;font-family:var(--mono);font-size:10px;cursor:pointer;font-weight:600">+ Aggiungi frigorifero</button>
-      <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;background:var(--bg3);border:1px solid var(--line2);color:var(--sub);border-radius:8px;padding:7px 12px;font-family:var(--mono);font-size:10px;font-weight:600">
-        &#128194; Aggiorna lista sensori
-        <input type="file" id="sF" accept=".txt" style="display:none">
-      </label>
       <span id="sensorFileLabel" style="font-family:var(--mono);font-size:10px;color:var(--dim)"></span>
     </div>
     <div class="sec" style="font-size:10px;color:var(--dim);margin-top:0">Le soglie T°/Umid. si configurano per ogni frigorifero qui sopra</div>
@@ -1753,19 +1785,7 @@ async function checkNow(){
 function go(i){location.href='/dashboard?client='+i;}
 function fl(m){const e=document.getElementById('flash');e.textContent=m;e.style.display='block';setTimeout(()=>e.style.display='none',4000);}
 // ─── FILE UPLOAD SENSORI ────────────────────────────────────────
-document.getElementById('sF').addEventListener('change',function(e){
-  const file=e.target.files[0]; if(!file)return;
-  const reader=new FileReader();
-  reader.onload=function(ev){
-    _sensoriDb=[];
-    ev.target.result.split(String.fromCharCode(10)).forEach(function(line){
-      line=line.split(String.fromCharCode(13)).join('').trim();
-      if(!line||line[0]==='#')return;
-      const parts=line.split(String.fromCharCode(9));
-      const eui=(parts[0]||'').replace(/[^0-9A-Fa-f]/g,'').toUpperCase();
-      if(eui.length<8)return;
-      const desc=(parts[1]||'').trim()||('Sensore '+eui.slice(-6));
-      _sensoriDb.push({eui:eui,desc:desc});
+
     });
     document.getElementById('sensorFileLabel').textContent=_sensoriDb.length+' sensori caricati';
     fl(_sensoriDb.length+' sensori caricati dal file');
@@ -1778,8 +1798,8 @@ document.getElementById('sF').addEventListener('change',function(e){
   try{
     const s=await fetch('/api/sensori');
     if(s.ok){_sensoriDb=await s.json();}
-    if(_sensoriDb.length)
-      document.getElementById('sensorFileLabel').textContent=_sensoriDb.length+' sensori in lista';
+    var _liberi=_sensoriDb.length;
+    document.getElementById('sensorFileLabel').textContent=_liberi+' sensori disponibili';
   }catch(e){}
   addSensoreRow();
   runDiag();
@@ -2495,7 +2515,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "clients":len(load_clients()),"build":BUILD_TS})
             return
         if path == "/api/sensori":
-            self.send_json(load_sensori())
+            # Leggi sensori.txt e filtra quelli già assegnati
+            all_s = load_sensori()
+            clients_list = load_clients()
+            assigned = {}
+            for c in clients_list:
+                nome_c = (c.get("rag_soc","") or (c.get("cognome","")+" "+c.get("nome",""))).strip()
+                for s in c.get("sensori",[{"eui":c.get("eui","")}]):
+                    eui_s = (s.get("eui","") or "").upper()
+                    if eui_s: assigned[eui_s] = nome_c
+            # Restituisce solo i sensori NON assegnati
+            free = [s for s in all_s if s["eui"].upper() not in assigned]
+            self.send_json(free)
             return
 
         # ── Auth required for all other routes ──
@@ -2793,6 +2824,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         if keep in clients[idx]: updates[keep]=clients[idx][keep]
                     clients[idx]=updates
                     save_clients(clients)
+                    _update_sensori_file(clients)
                     print(f"  [OK] Aggiornato idx={idx}: {updates.get('cognome','')} {updates.get('nome','')}")
                     self.send_json({"ok":True})
                 else:
@@ -2906,6 +2938,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 clients=load_clients()
                 clients.append(body)
                 save_clients(clients)
+                _update_sensori_file(clients)
                 nome = body.get('cognome','') + ' ' + body.get('nome','')
                 print(f"  [OK] Salvato: {nome.strip()} — tot:{len(clients)}")
                 self.send_json({"ok":True,"total":len(clients),
