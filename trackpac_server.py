@@ -18,12 +18,19 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-19 10:48:53'
+BUILD_TS    = '2026-03-19 10:56:42'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
 _SCRIPT_DIR  = _os.path.dirname(_os.path.abspath(__file__))
 SENSORI_FILE = _os.path.join(_SCRIPT_DIR, "sensori.txt")
+
+# GitHub — per aggiornare sensori.txt automaticamente
+# In Dokploy aggiungi: GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO
+GITHUB_TOKEN = _os.environ.get("GITHUB_TOKEN", "")
+GITHUB_OWNER = _os.environ.get("GITHUB_OWNER", "")  # es. Mymine2026
+GITHUB_REPO  = _os.environ.get("GITHUB_REPO",  "")  # es. DashboardHACCP
+GITHUB_BRANCH= _os.environ.get("GITHUB_BRANCH","main")
 
 # SMTP config (Gmail: myaccount.google.com > Sicurezza > Password per le app)
 SMTP_HOST = _os.environ.get("SMTP_HOST", "smtp.gmail.com")
@@ -251,9 +258,46 @@ def _update_sensori_file(clients):
                 with open(path, "w", encoding="utf-8") as f:
                     f.writelines(new_lines)
                 print(f"  [SENSORI] sensori.txt aggiornato ({len(assigned)} assegnati)")
+                # Prova a pushare su GitHub
+                _push_sensori_to_github(new_lines)
                 return
     except Exception as e:
         print(f"  [SENSORI] Errore aggiornamento sensori.txt: {e}")
+
+def _push_sensori_to_github(lines):
+    """Pusha sensori.txt aggiornato su GitHub via API."""
+    if not GITHUB_TOKEN or not GITHUB_OWNER or not GITHUB_REPO:
+        print("  [GITHUB] Token/repo non configurati — skip push")
+        return
+    try:
+        import base64 as _b64
+        content = "".join(lines)
+        content_b64 = _b64.b64encode(content.encode("utf-8")).decode()
+        api_url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/sensori.txt"
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+            "Content-Type": "application/json",
+            "User-Agent": "MyMine-Dashboard"
+        }
+        # GET per recuperare lo SHA corrente del file
+        req_get = urllib.request.Request(api_url, headers=headers)
+        with urllib.request.urlopen(req_get, timeout=10) as r:
+            file_info = json.loads(r.read())
+        sha = file_info.get("sha", "")
+        # PUT per aggiornare
+        payload = json.dumps({
+            "message": "Auto: aggiorna sensori.txt con assegnazioni clienti",
+            "content": content_b64,
+            "sha": sha,
+            "branch": GITHUB_BRANCH
+        }).encode()
+        req_put = urllib.request.Request(api_url, data=payload, headers=headers, method="PUT")
+        with urllib.request.urlopen(req_put, timeout=15) as r:
+            result = json.loads(r.read())
+        print(f"  [GITHUB] sensori.txt pushato su GitHub (commit: {result.get('commit',{}).get('sha','?')[:7]})")
+    except Exception as e:
+        print(f"  [GITHUB] Errore push: {e}")
 
 def get_client_sensor(client, idx=0):
     sensori = client.get("sensori", [])

@@ -1,9 +1,5 @@
 # EUI	Descrizione	Cliente assegnato
 # Formato: EUI<TAB>Descrizione<TAB>Cliente (lascia vuoto se disponibile)
 # Aggiungi i tuoi sensori qui sotto, uno per riga
-24E124785F201049	Sensore Milano	
-24E124785D499946	Sensore Poggio
-24E124785D4999XX	Sensore Test
-24E124785D4999YY	Sensore Test2
-24E124785D4999ZZ	Sensore Test3
-24E124785D4999WW	Sensore Test4
+24E124785F201049	Sensore Frigo	
+24E124785D499946	Sensore Frigo	
