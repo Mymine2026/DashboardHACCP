@@ -18,7 +18,7 @@ import os as _os
 API_KEY = _os.environ.get("TRACKPAC_API_KEY", "YOUR_TRACKPAC_API_KEY")
 BASE    = _os.environ.get("TRACKPAC_BASE",    "https://v2-api.trackpac.io")
 PORT    = int(_os.environ.get("PORT", "8765"))
-BUILD_TS    = '2026-03-19 10:44:05'
+BUILD_TS    = '2026-03-19 10:48:53'
 _DATA_DIR   = _os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__)))
 DATA        = _os.path.join(_DATA_DIR, "clients.json")
 ALERTS_FILE = _os.path.join(_DATA_DIR, "alerts.json")
@@ -1784,15 +1784,6 @@ async function checkNow(){
 }
 function go(i){location.href='/dashboard?client='+i;}
 function fl(m){const e=document.getElementById('flash');e.textContent=m;e.style.display='block';setTimeout(()=>e.style.display='none',4000);}
-// ─── FILE UPLOAD SENSORI ────────────────────────────────────────
-
-    });
-    document.getElementById('sensorFileLabel').textContent=_sensoriDb.length+' sensori caricati';
-    fl(_sensoriDb.length+' sensori caricati dal file');
-  };
-  reader.readAsText(file);
-});
-
 // ─── INIT ────────────────────────────────────────────────────────
 (async function(){
   try{
