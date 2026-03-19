@@ -586,7 +586,8 @@
 <script>
 // ── CONFIG ─────────────────────────────────────────────────────────────────
 // Sostituisci con l'URL del tuo webhook n8n
-const N8N_WEBHOOK_URL = 'https://TUO-N8N-HOST/webhook/mymine-onboarding';
+// ⚠️ INSERISCI QUI IL TUO URL WEBHOOK N8N (Production URL dal nodo Webhook)
+const N8N_WEBHOOK_URL = 'https://n8n.mymine.cloud/webhook/mymine-onboarding';
 // ───────────────────────────────────────────────────────────────────────────
 
 function g(id) { return document.getElementById(id); }
@@ -611,7 +612,11 @@ function validate() {
   const nomeFrigo = val('fNomeFrigo');
   if (!tipoFrigo) { setError('fTipoFrigo', true); ok = false; }
   if (!nomeFrigo) { setError('fNomeFrigo', true); ok = false; }
-  if (tipoFrigo && !val('fTMax')) { setError('fTMax', true); ok = false; }
+  // fTMax solo se la sezione soglie è visibile
+  var soglieBox = g('soglieBox');
+  if (tipoFrigo && soglieBox && soglieBox.style.display !== 'none' && !val('fTMax')) {
+    setError('fTMax', true); ok = false;
+  }
   return ok;
 }
 
@@ -637,9 +642,19 @@ function aggiornaToglie() {
 }
 
 async function submitForm() {
+  // Controlla URL webhook configurato
+  if (!N8N_WEBHOOK_URL) {
+    g('msgBox').className = 'error';
+    g('msgBox').textContent = '⚠ Configurazione mancante: URL webhook non impostato. Contatta info@mymine.io';
+    return;
+  }
+
   if (!validate()) {
     g('msgBox').className = 'error';
     g('msgBox').textContent = '⚠ Compila tutti i campi obbligatori (evidenziati in rosso).';
+    // Scroll al primo errore
+    var first = document.querySelector('.error');
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
