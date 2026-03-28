@@ -55,6 +55,20 @@ TWILIO_FROM_NUMBER = _os.environ.get("TWILIO_FROM_NUMBER", "")
 
 ALERT_INTERVAL = 600
 
+# ─── CHIRPSTACK INTEGRATION ──────────────────────────────────────────────────
+# Imposta DATA_SOURCE=chirpstack in Dokploy per usare ChirpStack invece di Trackpac.
+# Con DATA_SOURCE=trackpac (default) tutto funziona esattamente come prima.
+DATA_SOURCE        = _os.environ.get("DATA_SOURCE",        "trackpac")   # "trackpac" | "chirpstack"
+CHIRPSTACK_URL     = _os.environ.get("CHIRPSTACK_URL",     "http://72.62.45.209:8080")
+CHIRPSTACK_API_KEY = _os.environ.get("CHIRPSTACK_API_KEY", "")
+CHIRPSTACK_APP_ID  = _os.environ.get("CHIRPSTACK_APP_ID",  "")
+CS_FRAMES_DIR      = _os.path.join(_os.environ.get("DATA_DIR", _os.path.dirname(_os.path.abspath(__file__))), "cs_frames")
+
+try:
+    _os.makedirs(CS_FRAMES_DIR, exist_ok=True)
+except Exception:
+    pass
+
 # ─── PostgreSQL (backup automatico clienti) ──────────────────────────────────
 DATABASE_URL = _os.environ.get("DATABASE_URL", "")
 
@@ -312,11 +326,166 @@ def load_alerts():
 def save_alerts(d):
     with open(ALERTS_FILE,"w") as f: json.dump(d,f,indent=2,ensure_ascii=False)
 
-def call_api(path):
-    req=urllib.request.Request(BASE+path,headers={"X-API-Key":API_KEY,"Accept":"application/json"})
+# ─── CHIRPSTACK ADAPTER ──────────────────────────────────────────────────────
+
+_cs_devices_cache = {}
+_cs_cache_ts      = 0.0
+
+
+def cs_api(path, method="GET", body=None):
+    """Chiama ChirpStack REST API v4 con autenticazione Bearer."""
+    url = CHIRPSTACK_URL.rstrip("/") + path
+    headers = {
+        "Accept":                       "application/json",
+        "Grpc-Metadata-Authorization":  f"Bearer {CHIRPSTACK_API_KEY}",
+    }
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req,timeout=20) as r: return r.read(),r.status
-    except urllib.error.HTTPError as e: return e.read(),e.code
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read()), r.status
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read() or b"{}"), e.code
+        except Exception:
+            return {}, e.code
+    except Exception as e:
+        print(f"  [CS_API] errore {path}: {e}")
+        return {}, 500
+
+
+def cs_get_devices():
+    """Lista dispositivi da ChirpStack in formato compatibile con Trackpac."""
+    global _cs_devices_cache, _cs_cache_ts
+    import time as _t2
+    if _t2.time() - _cs_cache_ts < 60 and _cs_devices_cache:
+        return list(_cs_devices_cache.values()), 200
+    qs = f"?applicationId={CHIRPSTACK_APP_ID}&limit=100" if CHIRPSTACK_APP_ID else "?limit=100"
+    resp, code = cs_api(f"/api/devices{qs}")
+    if code != 200:
+        print(f"  [CS] /api/devices errore {code}: {resp}")
+        return [], code
+    devices = []
+    for d in resp.get("result", []):
+        dev_eui = (d.get("devEui") or d.get("dev_eui") or "").upper()
+        if not dev_eui:
+            continue
+        device = {
+            "id":          dev_eui,
+            "dev_eui":     dev_eui,
+            "name":        d.get("name", dev_eui),
+            "description": d.get("description", ""),
+        }
+        devices.append(device)
+        _cs_devices_cache[dev_eui] = device
+    _cs_cache_ts = _t2.time()
+    print(f"  [CS] {len(devices)} dispositivi caricati da ChirpStack")
+    return devices, 200
+
+
+def cs_load_frames(dev_eui):
+    """Carica frame salvati localmente per un device EUI."""
+    dev_eui = dev_eui.upper()
+    path = _os.path.join(CS_FRAMES_DIR, f"{dev_eui}.json")
+    if not _os.path.exists(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"  [CS] Errore lettura frame {dev_eui}: {e}")
+        return []
+
+
+def cs_save_frame(dev_eui, frame):
+    """Aggiunge un frame al file locale. Mantiene max 10.000 frame (~2 mesi)."""
+    dev_eui = dev_eui.upper()
+    frames  = cs_load_frames(dev_eui)
+    frames.append(frame)
+    if len(frames) > 10000:
+        frames = frames[-10000:]
+    path = _os.path.join(CS_FRAMES_DIR, f"{dev_eui}.json")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(frames, f, ensure_ascii=False, separators=(",", ":"))
+    except Exception as e:
+        print(f"  [CS] Errore salvataggio frame {dev_eui}: {e}")
+
+
+def _cs_parse_ts(ts_str):
+    """Converte stringa ISO → datetime aware UTC."""
+    try:
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def cs_filter_days(frames, n_days):
+    """Filtra i frame degli ultimi n_days giorni."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=n_days)
+    return [f for f in frames
+            if (ts := _cs_parse_ts(f.get("time_created") or f.get("time", ""))) and ts >= cutoff]
+
+
+def cs_filter_range(frames, from_ts, to_ts):
+    """Filtra i frame in un range di date."""
+    return [f for f in frames
+            if (ts := _cs_parse_ts(f.get("time_created") or f.get("time", ""))) and from_ts <= ts <= to_ts]
+
+
+def call_api_cs(path):
+    """
+    Adapter ChirpStack → interfaccia Trackpac.
+      /device/                      → cs_get_devices()
+      /frame/days/{dev_eui}/{n}     → frame locali ultimi N giorni
+      /frame/{dev_eui}/{from}/{to}  → frame locali in range date
+    """
+    parts = path.strip("/").split("/")
+    if parts[0] == "device":
+        devices, code = cs_get_devices()
+        return json.dumps(devices).encode(), code
+    if parts[0] == "frame" and len(parts) >= 4 and parts[1] == "days":
+        dev_eui = parts[2].upper()
+        try:
+            n_days = int(parts[3])
+        except ValueError:
+            n_days = 7
+        frames = cs_load_frames(dev_eui)
+        return json.dumps(cs_filter_days(frames, n_days)).encode(), 200
+    if parts[0] == "frame" and len(parts) >= 4:
+        dev_eui  = parts[1].upper()
+        from_ts  = _cs_parse_ts(parts[2])
+        to_ts    = _cs_parse_ts(parts[3])
+        if from_ts is None or to_ts is None:
+            return json.dumps([]).encode(), 200
+        frames = cs_load_frames(dev_eui)
+        return json.dumps(cs_filter_range(frames, from_ts, to_ts)).encode(), 200
+    print(f"  [CS] Path non gestito: {path}")
+    return json.dumps([]).encode(), 200
+
+
+# ─── DATA ROUTER ─────────────────────────────────────────────────────────────
+
+def call_api(path):
+    """Entry point unico. Smista su Trackpac o ChirpStack in base a DATA_SOURCE."""
+    if DATA_SOURCE == "chirpstack":
+        return call_api_cs(path)
+    # Trackpac — comportamento originale invariato
+    req = urllib.request.Request(
+        BASE + path,
+        headers={"X-API-Key": API_KEY, "Accept": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.read(), r.status
+    except urllib.error.HTTPError as e:
+        return e.read(), e.code
 
 # XLSX builder
 def xe(s): return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace('"',"&quot;")
@@ -2842,6 +3011,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length",str(len(pdf))); self.end_headers(); self.wfile.write(pdf)
         elif path=="/version":
             self.send_json({"version":"3.1","build":BUILD_TS,"alarms":True,"email":True,"telegram":True,"sms":True})
+        elif path=="/api/cs_status":
+            result = {
+                "data_source":    DATA_SOURCE,
+                "chirpstack_url": CHIRPSTACK_URL,
+                "api_key_ok":     bool(CHIRPSTACK_API_KEY),
+                "app_id":         CHIRPSTACK_APP_ID or "(non configurato)",
+                "devices":        [],
+            }
+            if DATA_SOURCE == "chirpstack":
+                devices, _code = cs_get_devices()
+                for d in devices:
+                    eui    = d["dev_eui"]
+                    frames = cs_load_frames(eui)
+                    last_ts = None
+                    if frames:
+                        ts = frames[-1].get("time_created") or frames[-1].get("time", "")
+                        last_ts = ts[:19] if ts else None
+                    result["devices"].append({
+                        "dev_eui":    eui,
+                        "name":       d.get("name", ""),
+                        "frames_tot": len(frames),
+                        "last_uplink": last_ts or "nessuno",
+                    })
+            self.send_json(result)
         else: self.send_response(404); self.end_headers()
 
     def do_PUT(self):
@@ -2869,6 +3062,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else: self.send_response(404); self.end_headers()
 
     def do_POST(self):
+        if self.path=="/api/uplink":
+            """
+            Riceve uplink da ChirpStack HTTP Integration.
+            Configura in ChirpStack:
+              Application → Frigoriferi → Integrations → HTTP
+              Endpoint URL: https://chirpstack.mymine.cloud/api/uplink
+              Event types: ☑ Uplink
+            """
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                raw    = self.rfile.read(length)
+                event  = json.loads(raw)
+                dev_info = event.get("deviceInfo", {})
+                dev_eui  = (
+                    dev_info.get("devEui") or event.get("devEui") or ""
+                ).upper()
+                if not dev_eui:
+                    print("  [UPLINK] Evento senza devEui ignorato")
+                    self.send_json({"ok": False, "error": "devEui mancante"}, 400)
+                    return
+                ts_str = event.get("time") or datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+                frame  = {
+                    "time_created":    ts_str,
+                    "time":            ts_str,
+                    "decoded_payload": event.get("object", {}),
+                    "data":            event.get("data", ""),
+                    "dev_eui":         dev_eui,
+                    "device_name":     dev_info.get("deviceName", ""),
+                    "f_cnt":           event.get("fCnt", 0),
+                    "dr":              event.get("dr"),
+                    "frequency":       event.get("frequency"),
+                    "snr":  (event.get("rxInfo") or [{}])[0].get("snr"),
+                    "rssi": (event.get("rxInfo") or [{}])[0].get("rssi"),
+                }
+                cs_save_frame(dev_eui, frame)
+                payload = frame["decoded_payload"]
+                T = _get_val(payload, "temperature", "temp")
+                H = _get_val(payload, "humidity",    "hum")
+                tot = len(cs_load_frames(dev_eui))
+                print(f"  [UPLINK] {dev_eui}  T={T}°C  H={H}%  @ {ts_str[:19]}  (tot:{tot})")
+                self.send_json({"ok": True, "dev_eui": dev_eui, "T": T, "H": H})
+                threading.Thread(target=check_all_alarms, daemon=True).start()
+            except json.JSONDecodeError as e:
+                print(f"  [UPLINK] JSON non valido: {e}")
+                self.send_json({"ok": False, "error": "JSON non valido"}, 400)
+            except Exception as e:
+                import traceback
+                print(f"  [UPLINK] errore: {e}\n{traceback.format_exc()}")
+                self.send_json({"ok": False, "error": str(e)}, 500)
+            return
         if self.path=="/api/import":
             sess=self._get_sess()
             if not sess or sess["role"]!="admin":
