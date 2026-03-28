@@ -221,7 +221,12 @@ def save_clients(lst):
         threading.Thread(target=_pg_save, args=(lst,), daemon=True).start()
 
 def load_sensori():
-    """Carica lista sensori da sensori.txt (EUI<TAB>descrizione)."""
+    """
+    Carica lista sensori da sensori.txt.
+    Formato colonne (tab-separated):
+      EUI  descrizione  AppKey  cliente_assegnato
+    Le colonne AppKey e cliente sono opzionali per compatibilità con file esistenti.
+    """
     sensori = []
     cr = chr(13)
     for path in [SENSORI_FILE, _os.path.join(_DATA_DIR, "sensori.txt")]:
@@ -232,16 +237,38 @@ def load_sensori():
                         line = line.strip().replace(cr, "")
                         if not line or line.startswith("#"): continue
                         parts = line.split("\t")
-                        eui = parts[0].strip().upper()
-                        desc = parts[1].strip() if len(parts) > 1 else eui
+                        eui    = parts[0].strip().upper()
+                        desc   = parts[1].strip() if len(parts) > 1 else eui
+                        # Rileva se la colonna 2 è una AppKey (32 hex chars)
+                        # o il vecchio formato (nome cliente)
+                        appkey  = ""
+                        if len(parts) > 2:
+                            col2 = parts[2].strip()
+                            if len(col2) == 32 and all(c in "0123456789abcdefABCDEF" for c in col2):
+                                appkey = col2.upper()
+                            # else: è il vecchio formato senza AppKey, la colonna 2 è il cliente
                         if len(eui) >= 8:
-                            sensori.append({"eui": eui, "desc": desc})
+                            sensori.append({"eui": eui, "desc": desc, "appkey": appkey})
             except Exception: pass
             break
     return sensori
 
+
+def get_appkey_for_eui(eui):
+    """Restituisce la AppKey per un dato EUI da sensori.txt, o '' se non trovata."""
+    eui = eui.upper()
+    for s in load_sensori():
+        if s["eui"] == eui:
+            return s.get("appkey", "")
+    return ""
+
+
 def _update_sensori_file(clients):
-    """Aggiorna sensori.txt aggiungendo la colonna con il cliente assegnato."""
+    """
+    Aggiorna sensori.txt con la colonna cliente assegnato.
+    Preserva la colonna AppKey se presente.
+    Formato risultante: EUI  descrizione  AppKey  cliente_assegnato
+    """
     try:
         # Mappa EUI → nome cliente
         assigned = {}
@@ -267,12 +294,17 @@ def _update_sensori_file(clients):
                     parts = stripped.split("\t")
                     eui  = parts[0].strip().upper()
                     desc = parts[1].strip() if len(parts) > 1 else eui
+                    # Determina se la colonna 2 è AppKey o cliente (vecchio formato)
+                    appkey = ""
+                    if len(parts) > 2:
+                        col2 = parts[2].strip()
+                        if len(col2) == 32 and all(c in "0123456789abcdefABCDEF" for c in col2):
+                            appkey = col2.upper()
                     cliente = assigned.get(eui, "")
-                    new_lines.append(eui + "\t" + desc + "\t" + cliente + "\n")
+                    new_lines.append(eui + "\t" + desc + "\t" + appkey + "\t" + cliente + "\n")
                 with open(path, "w", encoding="utf-8") as f:
                     f.writelines(new_lines)
                 print(f"  [SENSORI] sensori.txt aggiornato ({len(assigned)} assegnati)")
-                # Prova a pushare su GitHub
                 _push_sensori_to_github(new_lines)
                 return
     except Exception as e:
