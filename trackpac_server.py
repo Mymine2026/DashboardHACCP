@@ -742,7 +742,7 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
     RED   = "0.75 0.05 0.05"
 
     # cols: Giorno|Ora|Sensore|Temp|Umid|Note|Azioni  — sum=525
-    COLS  = [50, 34, 70, 52, 48, 136, 135]
+    COLS  = [50, 34, 110, 52, 48, 116, 115]
     CLBLS = ["Giorno","Ora","Sensore","Temp.(C)","Umid.(%)","Note / Anomalie","Azioni Correttive"]
     RH    = 17
 
@@ -853,7 +853,7 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
         filledbox(LM, y-RH, TW, RH, bg)
         hline(y-RH, lw=0.2, rgb=LGREY)
         vals = [
-            row.get("giorno",""), row.get("ora",""), row.get("sensore",""),
+            row.get("giorno",""), row.get("ora",""), row.get("sensore","")[:22],
             fmt(T_val) if T_val is not None else "",
             fmt(row.get("H"),0) if row.get("H") is not None else "",
             "", "",
