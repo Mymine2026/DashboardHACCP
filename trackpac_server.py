@@ -358,31 +358,27 @@ def cs_api(path, method="GET", body=None):
 
 
 def cs_get_devices():
-    """Lista dispositivi da ChirpStack in formato compatibile con Trackpac."""
-    global _cs_devices_cache, _cs_cache_ts
-    import time as _t2
-    if _t2.time() - _cs_cache_ts < 60 and _cs_devices_cache:
-        return list(_cs_devices_cache.values()), 200
-    qs = f"?applicationId={CHIRPSTACK_APP_ID}&limit=100" if CHIRPSTACK_APP_ID else "?limit=100"
-    resp, code = cs_api(f"/api/devices{qs}")
-    if code != 200:
-        print(f"  [CS] /api/devices errore {code}: {resp}")
-        return [], code
+    """
+    Costruisce lista device direttamente dai clienti registrati in clients.json.
+    Non chiama l'API REST di ChirpStack (evita problemi di connettività tra container).
+    Formato compatibile con Trackpac: [{"id": dev_eui, "dev_eui": dev_eui, ...}]
+    """
     devices = []
-    for d in resp.get("result", []):
-        dev_eui = (d.get("devEui") or d.get("dev_eui") or "").upper()
-        if not dev_eui:
-            continue
-        device = {
-            "id":          dev_eui,
-            "dev_eui":     dev_eui,
-            "name":        d.get("name", dev_eui),
-            "description": d.get("description", ""),
-        }
-        devices.append(device)
-        _cs_devices_cache[dev_eui] = device
-    _cs_cache_ts = _t2.time()
-    print(f"  [CS] {len(devices)} dispositivi caricati da ChirpStack")
+    seen = set()
+    for c in load_clients():
+        for s in c.get("sensori", [{"eui": c.get("eui", "")}]):
+            eui = (s.get("eui") or "").upper()
+            if not eui or eui == "DA_CONFIGURARE" or eui in seen:
+                continue
+            seen.add(eui)
+            device = {
+                "id":          eui,
+                "dev_eui":     eui,
+                "name":        s.get("nome_frigo", eui[-6:]),
+                "description": "",
+            }
+            devices.append(device)
+    print(f"  [CS] {len(devices)} dispositivi dai clienti registrati")
     return devices, 200
 
 
