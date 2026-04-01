@@ -498,53 +498,9 @@
 
       <div class="divider"></div>
 
-      <!-- SECTION 4: Frigorifero -->
-      <div class="sep-label"><span>Frigorifero da monitorare</span></div>
-
-      <div class="row2" style="margin-bottom:14px">
-        <div class="field">
-          <label>Tipo di prodotto <span style="color:var(--red)">*</span></label>
-          <select id="fTipoFrigo" onchange="aggiornaToglie()">
-            <option value="">— Seleziona —</option>
-            <option value="Prodotti Freschi">Prodotti Freschi (0/+4 °C)</option>
-            <option value="Prodotti Surgelati">Prodotti Surgelati (-18 °C ±3)</option>
-            <option value="Prodotti Congelati">Prodotti Congelati (-12 °C)</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Nome frigorifero <span style="color:var(--red)">*</span></label>
-          <input id="fNomeFrigo" type="text" placeholder="es. Magazzino, Retro, Banco...">
-        </div>
-      </div>
-
-      <div id="soglieBox" style="display:none">
-        <div class="info-box" id="soglieInfo" style="margin-bottom:14px">
-          <div class="icon">&#127777;</div>
-          <div id="soglieInfoTesto"></div>
-        </div>
-        <div class="row2" style="margin-bottom:14px">
-          <div class="field">
-            <label>Temperatura minima (°C)</label>
-            <input id="fTMin" type="number" step="0.5" placeholder="es. 0">
-          </div>
-          <div class="field">
-            <label>Temperatura massima (°C) <span style="color:var(--red)">*</span></label>
-            <input id="fTMax" type="number" step="0.5" placeholder="es. 4">
-            <div class="hint">Superata questa soglia riceverai un allarme</div>
-          </div>
-        </div>
-        <div class="row2" style="margin-bottom:6px">
-          <div class="field">
-            <label>Umidità minima (%) <span class="opt">facoltativo</span></label>
-            <input id="fHMin" type="number" step="1" min="0" max="100" placeholder="es. 60">
-          </div>
-          <div class="field">
-            <label>Umidità massima (%) <span class="opt">facoltativo</span></label>
-            <input id="fHMax" type="number" step="1" min="0" max="100" placeholder="es. 90">
-          </div>
-        </div>
-      </div>
-
+      <!-- SECTION 4: Frigoriferi (dinamico) -->
+      <div class="sep-label"><span id="labelFrigo">Frigoriferi da monitorare</span></div>
+      <div id="frigoContainer"></div>
       <div class="divider"></div>
 
       <!-- SECTION 5: HACCP -->
@@ -584,98 +540,184 @@
 <footer>© 2026 MyMine Srl · P.IVA IT12038850967 · Sistema HACCP IoT</footer>
 
 <script>
-// ── CONFIG ─────────────────────────────────────────────────────────────────
-// Sostituisci con l'URL del tuo webhook n8n
-// ⚠️ INSERISCI QUI IL TUO URL WEBHOOK N8N (Production URL dal nodo Webhook)
+// ── CONFIG ──────────────────────────────────────────────────────────────────
 const N8N_WEBHOOK_URL = 'https://n8n.mymine.cloud/webhook/mymine-onboarding';
-// ───────────────────────────────────────────────────────────────────────────
 
-function g(id) { return document.getElementById(id); }
-function val(id) { return (g(id).value || '').trim(); }
-function setError(id, on) { g(id).classList.toggle('error', on); }
+// ── LEGGI PARAMETRI URL ─────────────────────────────────────────────────────
+var urlParams = new URLSearchParams(window.location.search);
+var NUM_SENSORI = Math.max(1, Math.min(10, parseInt(urlParams.get('sensori') || '1', 10)));
 
-function validate() {
-  let ok = true;
-  const required = ['fNome','fCognome','fRagSoc','fPiva','fEmail','fTel','fAddr','fCap','fCitta'];
-  required.forEach(function(id) {
-    const empty = !val(id);
-    setError(id, empty);
-    if (empty) ok = false;
-  });
-  // Email format
-  const email = val('fEmail');
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    setError('fEmail', true); ok = false;
-  }
-  // Frigo obbligatorio
-  const tipoFrigo = val('fTipoFrigo');
-  const nomeFrigo = val('fNomeFrigo');
-  if (!tipoFrigo) { setError('fTipoFrigo', true); ok = false; }
-  if (!nomeFrigo) { setError('fNomeFrigo', true); ok = false; }
-  // fTMax solo se la sezione soglie è visibile
-  var soglieBox = g('soglieBox');
-  if (tipoFrigo && soglieBox && soglieBox.style.display !== 'none' && !val('fTMax')) {
-    setError('fTMax', true); ok = false;
-  }
-  return ok;
-}
-
-// Temperature presets per type
+// ── PRESETS TEMPERATURA ─────────────────────────────────────────────────────
 var PRESETS = {
-  'Prodotti Freschi':   { t_min:  0,   t_max:  4,   info: 'Intervallo consigliato: 0°C / +4°C. Riceverai un allarme se supera +4°C.' },
-  'Prodotti Surgelati': { t_min: -21,  t_max: -15,  info: 'Intervallo consigliato: -18°C (±3°C). Allarme se supera -15°C.' },
-  'Prodotti Congelati': { t_min: null, t_max: -12,  info: 'Temperatura massima consigliata: -12°C. Allarme se supera -12°C.' }
+  'Prodotti Freschi':   { t_min: 0,    t_max: 4,   info: 'Intervallo consigliato: 0°C / +4°C' },
+  'Prodotti Surgelati': { t_min: -21,  t_max: -15, info: 'Intervallo consigliato: -18°C (±3°C)' },
+  'Prodotti Congelati': { t_min: null, t_max: -12, info: 'Temperatura massima consigliata: -12°C' }
 };
 
-function aggiornaToglie() {
-  var tipo = val('fTipoFrigo');
-  var box  = g('soglieBox');
+// ── GENERA SEZIONI FRIGO ────────────────────────────────────────────────────
+function buildFrigoSections() {
+  var container = document.getElementById('frigoContainer');
+  var label = document.getElementById('labelFrigo');
+  label.textContent = NUM_SENSORI === 1
+    ? 'Frigorifero da monitorare'
+    : 'Frigoriferi da monitorare (' + NUM_SENSORI + ' sensori)';
+
+  container.innerHTML = '';
+  for (var i = 0; i < NUM_SENSORI; i++) {
+    container.appendChild(buildFrigoBlock(i));
+  }
+}
+
+function buildFrigoBlock(i) {
+  var wrap = document.createElement('div');
+  wrap.className = 'frigo-block';
+  wrap.id = 'frigo_' + i;
+  wrap.style.cssText = 'background:var(--bg);border:1.5px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:14px';
+
+  var title = NUM_SENSORI > 1
+    ? '<div style="font-family:var(--mono);font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px">Frigorifero ' + (i+1) + ' di ' + NUM_SENSORI + '</div>'
+    : '';
+
+  wrap.innerHTML = title +
+    '<div class="row2" style="margin-bottom:12px">' +
+      '<div class="field">' +
+        '<label>Tipo di prodotto <span style="color:var(--red)">*</span></label>' +
+        '<select id="fTipoFrigo_' + i + '" onchange="aggiornaToglie(' + i + ')">' +
+          '<option value="">— Seleziona —</option>' +
+          '<option value="Prodotti Freschi">Prodotti Freschi (0/+4 °C)</option>' +
+          '<option value="Prodotti Surgelati">Prodotti Surgelati (-18 °C ±3)</option>' +
+          '<option value="Prodotti Congelati">Prodotti Congelati (-12 °C)</option>' +
+        '</select>' +
+      '</div>' +
+      '<div class="field">' +
+        '<label>Nome frigorifero <span style="color:var(--red)">*</span></label>' +
+        '<input id="fNomeFrigo_' + i + '" type="text" placeholder="es. Magazzino, Retro, Banco...">' +
+      '</div>' +
+    '</div>' +
+    '<div id="soglieBox_' + i + '" style="display:none">' +
+      '<div class="info-box" style="margin-bottom:12px">' +
+        '<div class="icon">&#127777;</div>' +
+        '<div id="soglieInfoTesto_' + i + '"></div>' +
+      '</div>' +
+      '<div class="row2" style="margin-bottom:10px">' +
+        '<div class="field">' +
+          '<label>Temperatura minima (°C)</label>' +
+          '<input id="fTMin_' + i + '" type="number" step="0.5" placeholder="es. 0">' +
+        '</div>' +
+        '<div class="field">' +
+          '<label>Temperatura massima (°C) <span style="color:var(--red)">*</span></label>' +
+          '<input id="fTMax_' + i + '" type="number" step="0.5" placeholder="es. 4">' +
+          '<div class="hint">Superata questa soglia riceverai un allarme</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="row2">' +
+        '<div class="field">' +
+          '<label>Umidità minima (%) <span class="opt">facoltativo</span></label>' +
+          '<input id="fHMin_' + i + '" type="number" step="1" min="0" max="100" placeholder="es. 60">' +
+        '</div>' +
+        '<div class="field">' +
+          '<label>Umidità massima (%) <span class="opt">facoltativo</span></label>' +
+          '<input id="fHMax_' + i + '" type="number" step="1" min="0" max="100" placeholder="es. 90">' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  // Attach event listeners for clearing errors
+  setTimeout(function() {
+    var sel = document.getElementById('fTipoFrigo_' + i);
+    var inp = document.getElementById('fNomeFrigo_' + i);
+    if (sel) sel.addEventListener('change', function() { sel.classList.remove('error'); });
+    if (inp) inp.addEventListener('input', function() { inp.classList.remove('error'); });
+  }, 0);
+
+  return wrap;
+}
+
+function aggiornaToglie(i) {
+  var tipo = (document.getElementById('fTipoFrigo_' + i).value || '').trim();
+  var box  = document.getElementById('soglieBox_' + i);
   if (!tipo) { box.style.display = 'none'; return; }
   box.style.display = 'block';
   var p = PRESETS[tipo];
   if (p) {
-    if (p.t_min !== null) g('fTMin').value = p.t_min;
-    else g('fTMin').value = '';
-    g('fTMax').value = p.t_max;
-    g('soglieInfoTesto').textContent = p.info;
+    var tmin = document.getElementById('fTMin_' + i);
+    var tmax = document.getElementById('fTMax_' + i);
+    var info = document.getElementById('soglieInfoTesto_' + i);
+    tmin.value = p.t_min !== null ? p.t_min : '';
+    tmax.value = p.t_max;
+    if (info) info.textContent = p.info;
   }
 }
 
+// ── HELPERS ─────────────────────────────────────────────────────────────────
+function g(id) { return document.getElementById(id); }
+function val(id) { var el = g(id); return el ? (el.value || '').trim() : ''; }
+function setError(id, on) { var el = g(id); if (el) el.classList.toggle('error', on); }
+
+// ── VALIDAZIONE ─────────────────────────────────────────────────────────────
+function validate() {
+  var ok = true;
+  var required = ['fNome','fCognome','fRagSoc','fPiva','fEmail','fTel','fAddr','fCap','fCitta'];
+  required.forEach(function(id) {
+    var empty = !val(id);
+    setError(id, empty);
+    if (empty) ok = false;
+  });
+  var email = val('fEmail');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setError('fEmail', true); ok = false;
+  }
+  for (var i = 0; i < NUM_SENSORI; i++) {
+    if (!val('fTipoFrigo_' + i)) { setError('fTipoFrigo_' + i, true); ok = false; }
+    if (!val('fNomeFrigo_' + i)) { setError('fNomeFrigo_' + i, true); ok = false; }
+    var box = g('soglieBox_' + i);
+    if (box && box.style.display !== 'none' && !val('fTMax_' + i)) {
+      setError('fTMax_' + i, true); ok = false;
+    }
+  }
+  return ok;
+}
+
+// ── SUBMIT ──────────────────────────────────────────────────────────────────
 async function submitForm() {
-  // Controlla URL webhook configurato
   if (!N8N_WEBHOOK_URL) {
     g('msgBox').className = 'error';
-    g('msgBox').textContent = '⚠ Configurazione mancante: URL webhook non impostato. Contatta info@mymine.io';
+    g('msgBox').textContent = '⚠ Configurazione mancante. Contatta info@mymine.io';
     return;
   }
-
   if (!validate()) {
     g('msgBox').className = 'error';
     g('msgBox').textContent = '⚠ Compila tutti i campi obbligatori (evidenziati in rosso).';
-    // Scroll al primo errore
     var first = document.querySelector('.error');
     if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
-  const btn = g('btnSubmit');
+  var btn = g('btnSubmit');
   btn.disabled = true;
   btn.classList.add('loading');
   g('msgBox').style.display = 'none';
 
-  // Build nome_frigo as "Tipo - Nome" for MyMine dashboard
-  const tipoFrigo = val('fTipoFrigo');
-  const nomeFrigo = val('fNomeFrigo');
-  const nomeFrigoCompleto = tipoFrigo && nomeFrigo
-    ? tipoFrigo + ' - ' + nomeFrigo
-    : nomeFrigo || tipoFrigo || 'Frigo 1';
+  // Costruisci array sensori
+  var sensori = [];
+  for (var i = 0; i < NUM_SENSORI; i++) {
+    var tipo = val('fTipoFrigo_' + i);
+    var nome = val('fNomeFrigo_' + i);
+    var tMinV = val('fTMin_' + i);
+    var tMaxV = val('fTMax_' + i);
+    var hMinV = val('fHMin_' + i);
+    var hMaxV = val('fHMax_' + i);
+    sensori.push({
+      eui:        'DA_CONFIGURARE',
+      nome_frigo: tipo && nome ? tipo + ' - ' + nome : nome || tipo || ('Frigo ' + (i+1)),
+      t_min:      tMinV !== '' ? parseFloat(tMinV) : null,
+      t_max:      tMaxV !== '' ? parseFloat(tMaxV) : null,
+      h_min:      hMinV !== '' ? parseFloat(hMinV) : null,
+      h_max:      hMaxV !== '' ? parseFloat(hMaxV) : null
+    });
+  }
 
-  const tMin = val('fTMin') !== '' ? parseFloat(val('fTMin')) : null;
-  const tMax = val('fTMax') !== '' ? parseFloat(val('fTMax')) : null;
-  const hMin = val('fHMin') !== '' ? parseFloat(val('fHMin')) : null;
-  const hMax = val('fHMax') !== '' ? parseFloat(val('fHMax')) : null;
-
-  const payload = {
+  var payload = {
     nome:        val('fNome'),
     cognome:     val('fCognome'),
     rag_soc:     val('fRagSoc'),
@@ -687,30 +729,19 @@ async function submitForm() {
     citta:       val('fCitta'),
     provincia:   val('fProv').toUpperCase(),
     resp_haccp:  val('fRespHaccp') || val('fNome') + ' ' + val('fCognome'),
-    sensori: [{
-      eui:        'DA_CONFIGURARE',
-      nome_frigo: nomeFrigoCompleto,
-      t_min:      tMin,
-      t_max:      tMax,
-      h_min:      hMin,
-      h_max:      hMax
-    }],
+    sensori:     sensori,
     notif_email: true,
-    notif_sms:   false
+    notif_sms:   true
   };
 
   try {
-    const res = await fetch(N8N_WEBHOOK_URL, {
+    var res = await fetch(N8N_WEBHOOK_URL, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(payload)
     });
+    if (!res.ok) throw new Error('Errore server: ' + res.status);
 
-    if (!res.ok) {
-      throw new Error('Errore server: ' + res.status);
-    }
-
-    // Show success
     g('formCard').querySelectorAll('.section-header, .form-body').forEach(function(el) {
       el.style.display = 'none';
     });
@@ -719,23 +750,21 @@ async function submitForm() {
 
   } catch (err) {
     g('msgBox').className = 'error';
-    g('msgBox').textContent = '⚠ Si è verificato un errore: ' + err.message + '. Riprova o contatta supporto@mymine.io';
+    g('msgBox').textContent = '⚠ Errore: ' + err.message + '. Riprova o scrivi a supporto@mymine.io';
     btn.disabled = false;
     btn.classList.remove('loading');
   }
 }
 
-// Clear error on input
-document.querySelectorAll('select').forEach(function(sel) {
-  sel.addEventListener('change', function() {
-    sel.classList.remove('error');
-  });
-});
-document.querySelectorAll('input').forEach(function(inp) {
-  inp.addEventListener('input', function() {
-    inp.classList.remove('error');
-    g('msgBox').style.display = 'none';
-    g('msgBox').className = '';
+// ── INIT ────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  buildFrigoSections();
+  document.querySelectorAll('input').forEach(function(inp) {
+    inp.addEventListener('input', function() {
+      inp.classList.remove('error');
+      g('msgBox').style.display = 'none';
+      g('msgBox').className = '';
+    });
   });
 });
 </script>
