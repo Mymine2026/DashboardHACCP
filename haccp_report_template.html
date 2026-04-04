@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- ============================================================
+       PDF METADATA STRUTTURATI
+       Questi tag vengono letti da Gotenberg/WeasyPrint per popolare
+       i metadati del file PDF generato.
+       In produzione: sostituire i valori con variabili n8n ({{ }})
+  ============================================================ -->
+  <title>Registro HACCP — {{ location_name }} — {{ period_label }}</title>
+  <meta name="author"          content="{{ operator_name }}">
+  <meta name="subject"         content="Registro HACCP Monitoraggio Temperature - Reg. CE 852/2004">
+  <meta name="keywords"        content="HACCP, temperatura, monitoraggio, conformità, {{ location_name }}">
+  <meta name="description"     content="Report automatico di monitoraggio temperature HACCP per {{ location_name }}. Periodo: {{ period_label }}. Generato da sistema IoT certificato.">
+  <meta name="generator"       content="MyMine HACCP Monitor v1.0">
+  <meta name="report-id"       content="{{ report_uuid }}">
+  <meta name="report-hash"     content="{{ sha256_hash }}">
+  <meta name="generated-at"    content="{{ generated_at_iso }}">
+  <meta name="period-start"    content="{{ period_start_iso }}">
+  <meta name="period-end"      content="{{ period_end_iso }}">
+  <meta name="sensor-ids"      content="{{ sensor_deveui_list }}">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    /* ============================================================
+       VARIABILI E RESET
+    ============================================================ */
+    :root {
+      --navy:       #162340;
+      --navy-mid:   #1e3a5f;
+      --navy-light: #2c5282;
+      --accent:     #1a6b3c;
+      --accent-light: #e8f5ee;
+      --danger:     #b91c1c;
+      --danger-light: #fef2f2;
+      --warn:       #b45309;
+      --warn-light: #fffbeb;
+      --ok:         #15803d;
+      --ok-light:   #f0fdf4;
+      --neutral:    #64748b;
+      --border:     #dde3ed;
+      --bg:         #f8fafc;
+      --white:      #ffffff;
+      --text:       #1e293b;
+      --text-light: #475569;
+
+      --font-serif: 'Libre Baskerville', Georgia, serif;
+      --font-sans:  'DM Sans', system-ui, sans-serif;
+      --font-mono:  'DM Mono', 'Courier New', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { font-size: 13px; }
+
+    body {
+      font-family: var(--font-sans);
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* ============================================================
+       LAYOUT PAGINA
+    ============================================================ */
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+      background: var(--white);
+      box-shadow: 0 4px 40px rgba(0,0,0,0.10);
+    }
+
+    /* ============================================================
+       INTESTAZIONE
+    ============================================================ */
+    .header {
+      background: var(--navy);
+      color: var(--white);
+      padding: 28px 40px 24px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .logo-mark {
+      width: 36px;
+      height: 36px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .logo-text {
+      font-family: var(--font-serif);
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: var(--white);
+    }
+
+    .logo-text span {
+      color: #7dd3ab;
+      font-style: italic;
+      font-weight: 400;
+    }
+
+    .header-title {
+      font-family: var(--font-serif);
+      font-size: 1.55rem;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--white);
+      margin-bottom: 4px;
+    }
+
+    .header-subtitle {
+      font-size: 0.82rem;
+      color: #94b8d8;
+      font-weight: 300;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .header-meta {
+      text-align: right;
+    }
+
+    .header-meta .badge {
+      display: inline-block;
+      background: var(--accent);
+      color: var(--white);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 3px;
+      margin-bottom: 8px;
+    }
+
+    .header-meta table {
+      font-size: 0.78rem;
+      color: #94b8d8;
+      border-collapse: collapse;
+      text-align: right;
+    }
+
+    .header-meta td { padding: 1px 0; }
+    .header-meta td:first-child { color: #c8ddef; font-weight: 500; padding-right: 12px; }
+
+    /* ============================================================
+       BARRA DATI LOCATION
+    ============================================================ */
+    .location-bar {
+      background: var(--navy-mid);
+      padding: 14px 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 16px;
+    }
+
+    .loc-item label {
+      display: block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #7db4d8;
+      margin-bottom: 2px;
+    }
+
+    .loc-item span {
+      font-size: 0.82rem;
+      color: var(--white);
+      font-weight: 500;
+    }
+
+    /* ============================================================
+       CONTENUTO PRINCIPALE
+    ============================================================ */
+    .content {
+      padding: 32px 40px;
+    }
+
+    /* ============================================================
+       SEZIONI
+    ============================================================ */
+    .section {
+      margin-bottom: 32px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--navy);
+    }
+
+    .section-number {
+      width: 24px;
+      height: 24px;
+      background: var(--navy);
+      color: var(--white);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .section-title {
+      font-family: var(--font-serif);
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--navy);
+      letter-spacing: 0.01em;
+    }
+
+    /* ============================================================
+       SOMMARIO KPI
+    ============================================================ */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .kpi-card {
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+    }
+
+    .kpi-card.ok::before   { background: var(--ok); }
+    .kpi-card.warn::before { background: var(--warn); }
+    .kpi-card.danger::before { background: var(--danger); }
+    .kpi-card.neutral::before { background: var(--navy); }
+
+    .kpi-label {
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--neutral);
+      margin-bottom: 4px;
+    }
+
+    .kpi-value {
+      font-family: var(--font-serif);
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: var(--navy);
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+
+    .kpi-value.danger { color: var(--danger); }
+    .kpi-value.warn   { color: var(--warn); }
+    .kpi-value.ok     { color: var(--ok); }
+
+    .kpi-sub {
+      font-size: 0.68rem;
+      color: var(--neutral);
+    }
+
+    /* ============================================================
+       SENSORI ATTIVI
+    ============================================================ */
+    .sensor-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .sensor-card {
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .sensor-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 0 3px var(--ok-light);
+    }
+
+    .sensor-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-light); }
+
+    .sensor-info .sensor-name {
+      font-weight: 600;
+      font-size: 0.8rem;
+      color: var(--navy);
+    }
+
+    .sensor-info .sensor-eui {
+      font-family: var(--font-mono);
+      font-size: 0.64rem;
+      color: var(--neutral);
+    }
+
+    .sensor-temp {
+      font-family: var(--font-serif);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--navy);
+      text-align: right;
+    }
+
+    .sensor-temp .range {
+      display: block;
+      font-family: var(--font-sans);
+      font-size: 0.6rem;
+      color: var(--neutral);
+      font-weight: 400;
+    }
+
+    /* ============================================================
+       GRAFICO TEMPERATURA (SVG inline)
+    ============================================================ */
+    .chart-container {
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    .chart-legend {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 10px;
+      font-size: 0.7rem;
+      color: var(--neutral);
+    }
+
+    .chart-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .chart-legend-line {
+      width: 20px;
+      height: 2px;
+      border-radius: 1px;
+    }
+
+    .chart-wrap {
+      position: relative;
+      width: 100%;
+    }
+
+    .chart-wrap svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* ============================================================
+       TABELLA LETTURE GIORNALIERE
+    ============================================================ */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+    }
+
+    .data-table thead tr {
+      background: var(--navy);
+      color: var(--white);
+    }
+
+    .data-table thead th {
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.68rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .data-table thead th:not(:first-child) { text-align: right; }
+
+    .data-table tbody tr:nth-child(even) { background: var(--bg); }
+    .data-table tbody tr:hover { background: #eef2f8; }
+
+    .data-table tbody td {
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .data-table tbody td:not(:first-child) {
+      text-align: right;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+
+    .data-table .reading-ok   { color: var(--ok); font-weight: 600; }
+    .data-table .reading-warn { color: var(--warn); font-weight: 600; }
+    .data-table .reading-bad  { color: var(--danger); font-weight: 700; }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .pill.ok     { background: var(--ok-light);   color: var(--ok); }
+    .pill.warn   { background: var(--warn-light);  color: var(--warn); }
+    .pill.danger { background: var(--danger-light); color: var(--danger); }
+
+    /* ============================================================
+       EVENTI DI ALLARME
+    ============================================================ */
+    .alarm-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .alarm-card {
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .alarm-card.severity-high   { border-left: 4px solid var(--danger); }
+    .alarm-card.severity-medium { border-left: 4px solid var(--warn); }
+
+    .alarm-header {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--bg);
+    }
+
+    .alarm-icon {
+      font-size: 1rem;
+    }
+
+    .alarm-title {
+      font-weight: 600;
+      font-size: 0.8rem;
+      color: var(--navy);
+    }
+
+    .alarm-title .alarm-sensor {
+      font-weight: 400;
+      color: var(--neutral);
+      font-size: 0.72rem;
+    }
+
+    .alarm-time {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--neutral);
+    }
+
+    .alarm-duration {
+      font-size: 0.7rem;
+      font-weight: 600;
+      background: var(--border);
+      padding: 2px 8px;
+      border-radius: 10px;
+      color: var(--text-light);
+    }
+
+    .alarm-detail {
+      padding: 10px 14px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .alarm-stat label {
+      display: block;
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--neutral);
+      margin-bottom: 2px;
+    }
+
+    .alarm-stat span {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .alarm-stat span.bad  { color: var(--danger); }
+    .alarm-stat span.warn { color: var(--warn); }
+
+    /* ============================================================
+       AZIONI CORRETTIVE
+    ============================================================ */
+    .corrective-section {
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 0 0 6px 6px;
+      border-top: none;
+      padding: 12px 14px;
+    }
+
+    .corrective-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--navy-light);
+      margin-bottom: 6px;
+    }
+
+    .corrective-label::before {
+      content: '';
+      width: 12px;
+      height: 12px;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%232c5282'%3E%3Cpath d='M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'/%3E%3C/svg%3E") center/contain no-repeat;
+      flex-shrink: 0;
+    }
+
+    .corrective-body {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .corrective-text {
+      font-size: 0.78rem;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .corrective-meta {
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .corrective-meta .operator {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--navy);
+    }
+
+    .corrective-meta .timestamp {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--neutral);
+    }
+
+    /* Azione correttiva MANCANTE */
+    .corrective-missing {
+      background: var(--danger-light);
+      border: 1.5px dashed var(--danger);
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 0.74rem;
+      color: var(--danger);
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* ============================================================
+       RIEPILOGO CONFORMITÀ
+    ============================================================ */
+    .compliance-box {
+      background: linear-gradient(135deg, var(--navy) 0%, var(--navy-mid) 100%);
+      border-radius: 8px;
+      padding: 20px 24px;
+      color: var(--white);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .compliance-title {
+      font-family: var(--font-serif);
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .compliance-sub {
+      font-size: 0.74rem;
+      color: #94b8d8;
+    }
+
+    .compliance-score {
+      text-align: center;
+    }
+
+    .compliance-score .pct {
+      font-family: var(--font-serif);
+      font-size: 2.4rem;
+      font-weight: 700;
+      line-height: 1;
+      color: #7dd3ab;
+    }
+
+    .compliance-score .pct-label {
+      font-size: 0.68rem;
+      color: #94b8d8;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .compliance-bars {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .comp-bar-item label {
+      display: block;
+      font-size: 0.65rem;
+      color: #94b8d8;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .comp-bar-track {
+      height: 5px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .comp-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: #7dd3ab;
+    }
+
+    .comp-bar-fill.warn { background: #fbbf24; }
+    .comp-bar-fill.danger { background: #f87171; }
+
+    .comp-bar-val {
+      font-size: 0.68rem;
+      color: var(--white);
+      margin-top: 2px;
+      font-weight: 600;
+    }
+
+    /* ============================================================
+       DICHIARAZIONE RESPONSABILE
+    ============================================================ */
+    .declaration-box {
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      padding: 16px 20px;
+      background: var(--bg);
+    }
+
+    .declaration-text {
+      font-size: 0.78rem;
+      color: var(--text-light);
+      line-height: 1.7;
+      margin-bottom: 20px;
+      font-style: italic;
+    }
+
+    .signature-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    .signature-field label {
+      display: block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--neutral);
+      margin-bottom: 24px;
+    }
+
+    .signature-line {
+      border-bottom: 1.5px solid var(--text);
+      padding-bottom: 4px;
+      font-size: 0.78rem;
+      color: var(--text);
+      min-height: 24px;
+    }
+
+    .signature-line.prefilled {
+      font-weight: 500;
+      border-bottom-color: var(--navy);
+    }
+
+    /* ============================================================
+       FOOTER INTEGRITÀ
+    ============================================================ */
+    .integrity-footer {
+      background: var(--navy);
+      padding: 16px 40px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: center;
+    }
+
+    .integrity-hash {
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      color: #7db4d8;
+      word-break: break-all;
+    }
+
+    .integrity-hash strong {
+      display: block;
+      font-size: 0.6rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #94b8d8;
+      margin-bottom: 2px;
+      font-weight: 600;
+    }
+
+    .integrity-badge {
+      background: var(--accent);
+      border-radius: 6px;
+      padding: 8px 14px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .integrity-badge .ibadge-icon { font-size: 1.2rem; margin-bottom: 2px; }
+    .integrity-badge .ibadge-text {
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--white);
+      display: block;
+    }
+
+    .page-footer {
+      background: #0f1a2e;
+      padding: 10px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.62rem;
+      color: #4a6585;
+    }
+
+    .page-footer a { color: #7db4d8; text-decoration: none; }
+
+    /* ============================================================
+       PRINT / PDF
+    ============================================================ */
+    @media print {
+      body { background: white; font-size: 11px; }
+      .page { box-shadow: none; max-width: 100%; }
+      .section { margin-bottom: 20px; }
+      .content { padding: 24px 32px; }
+      .header, .location-bar { padding-left: 32px; padding-right: 32px; }
+      .integrity-footer, .page-footer { padding-left: 32px; padding-right: 32px; }
+
+      /* Evita interruzioni di pagina dentro le card allarme */
+      .alarm-card, .kpi-grid, .sensor-card { break-inside: avoid; }
+
+      /* Salta pagina prima della sezione conformità */
+      .section.compliance-section { break-before: page; }
+    }
+
+    @page {
+      size: A4;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ================================================================
+       INTESTAZIONE
+  ================================================================ -->
+  <header class="header">
+    <div>
+      <div class="header-logo">
+        <div class="logo-mark">🌡</div>
+        <div class="logo-text">My<span>Mine</span> HACCP</div>
+      </div>
+      <div class="header-title">Registro Monitoraggio Temperature</div>
+      <div class="header-subtitle">Reg. CE 852/2004 · D.Lgs. 193/2007 · Piano HACCP Aziendale</div>
+    </div>
+    <div class="header-meta">
+      <div class="badge">Conforme HACCP</div>
+      <table>
+        <tr><td>Periodo</td><td>{{ period_label }}</td></tr>
+        <tr><td>Generato il</td><td>{{ generated_at_display }}</td></tr>
+        <tr><td>Report ID</td><td>{{ report_uuid_short }}</td></tr>
+        <tr><td>Sensori attivi</td><td>{{ sensor_count }}</td></tr>
+      </table>
+    </div>
+  </header>
+
+  <!-- ================================================================
+       BARRA LOCATION
+  ================================================================ -->
+  <div class="location-bar">
+    <div class="loc-item">
+      <label>Esercizio</label>
+      <span>{{ location_name }}</span>
+    </div>
+    <div class="loc-item">
+      <label>Indirizzo</label>
+      <span>{{ location_address }}</span>
+    </div>
+    <div class="loc-item">
+      <label>Titolare / Responsabile</label>
+      <span>{{ responsible_name }}</span>
+    </div>
+    <div class="loc-item">
+      <label>P.IVA</label>
+      <span>{{ piva }}</span>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       CONTENUTO
+  ================================================================ -->
+  <main class="content">
+
+    <!-- SEZIONE 1: RIEPILOGO PERIODO -->
+    <section class="section">
+      <div class="section-header">
+        <div class="section-number">1</div>
+        <div class="section-title">Riepilogo del Periodo</div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card ok">
+          <div class="kpi-label">Conformità globale</div>
+          <div class="kpi-value ok">96,4%</div>
+          <div class="kpi-sub">dei campionamenti entro soglia</div>
+        </div>
+        <div class="kpi-card neutral">
+          <div class="kpi-label">Campionamenti totali</div>
+          <div class="kpi-value">2.880</div>
+          <div class="kpi-sub">ogni 15 min × 2 sensori × 10 gg</div>
+        </div>
+        <div class="kpi-card danger">
+          <div class="kpi-label">Allarmi temperatura</div>
+          <div class="kpi-value danger">3</div>
+          <div class="kpi-sub">escursioni fuori soglia</div>
+        </div>
+        <div class="kpi-card ok">
+          <div class="kpi-label">Azioni correttive</div>
+          <div class="kpi-value ok">2/3</div>
+          <div class="kpi-sub">documentate (1 mancante)</div>
+        </div>
+        <div class="kpi-card neutral">
+          <div class="kpi-label">Uptime sistema</div>
+          <div class="kpi-value">99,8%</div>
+          <div class="kpi-sub">minuti offline: 29</div>
+        </div>
+      </div>
+
+      <!-- Sensori attivi -->
+      <div class="sensor-list">
+        <div class="sensor-card">
+          <div class="sensor-dot"></div>
+          <div class="sensor-info">
+            <div class="sensor-name">Cella Frigo Carni — Piano -1</div>
+            <div class="sensor-eui">DevEUI: A840411B11234501 · Milesight EM320-TH</div>
+          </div>
+          <div class="sensor-temp">
+            −1.4°C
+            <span class="range">soglia: −2° / +4°C</span>
+          </div>
+        </div>
+        <div class="sensor-card">
+          <div class="sensor-dot"></div>
+          <div class="sensor-info">
+            <div class="sensor-name">Banco Refrigerato Cucina</div>
+            <div class="sensor-eui">DevEUI: A840411B11234502 · Milesight EM320-TH</div>
+          </div>
+          <div class="sensor-temp">
+            +4.1°C
+            <span class="range">soglia: +2° / +6°C</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SEZIONE 2: GRAFICO TEMPERATURE -->
+    <section class="section">
+      <div class="section-header">
+        <div class="section-number">2</div>
+        <div class="section-title">Andamento Temperature — Ultimi 10 Giorni</div>
+      </div>
+
+      <div class="chart-container">
+        <div class="chart-legend">
+          <div class="chart-legend-item">
+            <div class="chart-legend-line" style="background:#2c5282"></div>
+            Cella Frigo Carni
+          </div>
+          <div class="chart-legend-item">
+            <div class="chart-legend-line" style="background:#1a6b3c"></div>
+            Banco Refrigerato
+          </div>
+          <div class="chart-legend-item">
+            <div class="chart-legend-line" style="background:#b91c1c; border-top: 2px dashed #b91c1c; height:0;"></div>
+            Soglia max
+          </div>
+        </div>
+
+        <div class="chart-wrap">
+          <!-- SVG GRAFICO — in produzione generato da n8n/Chart.js server-side -->
+          <svg viewBox="0 0 760 160" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+            <!-- Griglia -->
+            <defs>
+              <pattern id="grid" width="76" height="32" patternUnits="userSpaceOnUse">
+                <path d="M 76 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>
+              </pattern>
+            </defs>
+            <rect width="760" height="160" fill="url(#grid)"/>
+
+            <!-- Etichette asse Y -->
+            <text x="0" y="12" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">+8°</text>
+            <text x="0" y="44" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">+6°</text>
+            <text x="0" y="76" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">+4°</text>
+            <text x="0" y="108" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">+2°</text>
+            <text x="0" y="140" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace"> 0°</text>
+            <text x="0" y="160" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">−2°</text>
+
+            <!-- Linea soglia max cella (4°C) — tratteggiata rossa -->
+            <line x1="18" y1="76" x2="760" y2="76" stroke="#b91c1c" stroke-width="1" stroke-dasharray="6,3" opacity="0.6"/>
+
+            <!-- Area Cella Frigo (valori simulati) -->
+            <polyline
+              points="20,148 96,140 172,135 248,152 324,130 400,145 476,160 552,138 628,143 704,150 760,146"
+              fill="none" stroke="#2c5282" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+
+            <!-- Area Banco Refrigerato -->
+            <polyline
+              points="20,100 96,92 172,88 248,76 324,84 400,72 476,80 552,92 628,86 704,94 760,90"
+              fill="none" stroke="#1a6b3c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+
+            <!-- Punto allarme (4° gg, valore fuori soglia banco = 72 in SVG ≈ 7.5°C) -->
+            <circle cx="248" cy="68" r="5" fill="#b91c1c" opacity="0.9"/>
+            <text x="248" y="62" text-anchor="middle" font-size="7" fill="#b91c1c" font-family="DM Mono, monospace">⚠ 7.4°C</text>
+
+            <!-- Etichette asse X -->
+            <text x="20"  y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">01/07</text>
+            <text x="96"  y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">02/07</text>
+            <text x="172" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">03/07</text>
+            <text x="248" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">04/07</text>
+            <text x="324" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">05/07</text>
+            <text x="400" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">06/07</text>
+            <text x="476" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">07/07</text>
+            <text x="552" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">08/07</text>
+            <text x="628" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">09/07</text>
+            <text x="704" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">10/07</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- SEZIONE 3: LETTURE GIORNALIERE -->
+    <section class="section">
+      <div class="section-header">
+        <div class="section-number">3</div>
+        <div class="section-title">Riepilogo Giornaliero per Sensore</div>
+      </div>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Sensore</th>
+            <th>T° Min</th>
+            <th>T° Max</th>
+            <th>T° Media</th>
+            <th>Letture</th>
+            <th>Allarmi</th>
+            <th>Conformità</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Lun 01/07</td>
+            <td>Cella Frigo Carni</td>
+            <td class="reading-ok">−1.8°C</td>
+            <td class="reading-ok">+2.1°C</td>
+            <td>+0.4°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+          <tr>
+            <td>Lun 01/07</td>
+            <td>Banco Refrigerato</td>
+            <td class="reading-ok">+2.4°C</td>
+            <td class="reading-ok">+5.1°C</td>
+            <td>+3.8°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+          <tr>
+            <td>Mar 02/07</td>
+            <td>Cella Frigo Carni</td>
+            <td class="reading-ok">−2.0°C</td>
+            <td class="reading-ok">+1.8°C</td>
+            <td>−0.1°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+          <tr>
+            <td>Mar 02/07</td>
+            <td>Banco Refrigerato</td>
+            <td class="reading-ok">+2.1°C</td>
+            <td class="reading-ok">+5.8°C</td>
+            <td>+3.9°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+          <tr>
+            <td>Mer 03/07</td>
+            <td>Cella Frigo Carni</td>
+            <td class="reading-ok">−1.5°C</td>
+            <td class="reading-ok">+2.4°C</td>
+            <td>+0.7°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+          <tr>
+            <td>Mer 03/07</td>
+            <td>Banco Refrigerato</td>
+            <td class="reading-ok">+2.3°C</td>
+            <td class="reading-warn">+5.9°C</td>
+            <td>+4.2°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+          <tr>
+            <td>Gio 04/07</td>
+            <td>Cella Frigo Carni</td>
+            <td class="reading-ok">−1.2°C</td>
+            <td class="reading-ok">+3.1°C</td>
+            <td>+1.4°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+          <tr style="background:#fef9f9">
+            <td>Gio 04/07</td>
+            <td>Banco Refrigerato</td>
+            <td class="reading-ok">+2.8°C</td>
+            <td class="reading-bad">+7.4°C</td>
+            <td>+4.9°C</td>
+            <td>94</td>
+            <td>1 ⚠</td>
+            <td><span class="pill danger">ALLARME</span></td>
+          </tr>
+          <tr>
+            <td>Ven 05/07</td>
+            <td>Cella Frigo Carni</td>
+            <td class="reading-ok">−1.9°C</td>
+            <td class="reading-ok">+2.6°C</td>
+            <td>+0.3°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+          <tr>
+            <td>Ven 05/07</td>
+            <td>Banco Refrigerato</td>
+            <td class="reading-ok">+2.0°C</td>
+            <td class="reading-ok">+5.4°C</td>
+            <td>+3.7°C</td>
+            <td>96</td>
+            <td>—</td>
+            <td><span class="pill ok">OK</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="font-size:0.65rem; color:var(--neutral); margin-top:6px; text-align:right">
+        Tabella troncata per leggibilità — report completo disponibile nel portale (10 giorni × 2 sensori = 20 righe)
+      </p>
+    </section>
+
+    <!-- SEZIONE 4: EVENTI DI ALLARME E AZIONI CORRETTIVE -->
+    <section class="section">
+      <div class="section-header">
+        <div class="section-number">4</div>
+        <div class="section-title">Eventi di Allarme e Azioni Correttive</div>
+      </div>
+
+      <div class="alarm-list">
+
+        <!-- ALLARME 1: con azione correttiva documentata -->
+        <div class="alarm-card severity-high">
+          <div class="alarm-header">
+            <div class="alarm-icon">🔴</div>
+            <div class="alarm-title">
+              Escursione termica — superamento soglia massima
+              <div class="alarm-sensor">Banco Refrigerato Cucina · A840411B11234502</div>
+            </div>
+            <div class="alarm-time">04/07 · 14:32 → 15:18</div>
+            <div class="alarm-duration">46 min</div>
+          </div>
+          <div class="alarm-detail">
+            <div class="alarm-stat">
+              <label>Valore rilevato (max)</label>
+              <span class="bad">+7.4°C</span>
+            </div>
+            <div class="alarm-stat">
+              <label>Soglia configurata</label>
+              <span>+6.0°C</span>
+            </div>
+            <div class="alarm-stat">
+              <label>Scarto dalla soglia</label>
+              <span class="bad">+1.4°C per 46 min</span>
+            </div>
+          </div>
+          <div class="corrective-section">
+            <div class="corrective-label">Azione Correttiva Documentata</div>
+            <div class="corrective-body">
+              <div class="corrective-text">
+                Porta banco rimasta socchiusa durante la preparazione mise en place del pranzo. Richiusa immediatamente al ricevimento dell'SMS di allarme. Controllo visivo dei prodotti: tutti integri, nessuno spostato. Temperatura rientrata in soglia alle 15:18. Prodotti ritenuti conformi — non ci sono stati interventi sulla merce.
+              </div>
+              <div class="corrective-meta">
+                <div class="operator">Mario Rossi</div>
+                <div class="timestamp">04/07/2025 · 15:24</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ALLARME 2: con azione correttiva documentata -->
+        <div class="alarm-card severity-medium">
+          <div class="alarm-header">
+            <div class="alarm-icon">🟡</div>
+            <div class="alarm-title">
+              Escursione termica — avvicinamento soglia
+              <div class="alarm-sensor">Cella Frigo Carni — Piano -1 · A840411B11234501</div>
+            </div>
+            <div class="alarm-time">07/07 · 22:05 → 22:51</div>
+            <div class="alarm-duration">46 min</div>
+          </div>
+          <div class="alarm-detail">
+            <div class="alarm-stat">
+              <label>Valore rilevato (max)</label>
+              <span class="warn">+5.1°C</span>
+            </div>
+            <div class="alarm-stat">
+              <label>Soglia configurata</label>
+              <span>+4.0°C</span>
+            </div>
+            <div class="alarm-stat">
+              <label>Scarto dalla soglia</label>
+              <span class="warn">+1.1°C per 46 min</span>
+            </div>
+          </div>
+          <div class="corrective-section">
+            <div class="corrective-label">Azione Correttiva Documentata</div>
+            <div class="corrective-body">
+              <div class="corrective-text">
+                Allarme notturno ricevuto via SMS. Chiamata al cuoco responsabile. Accesso verificato: porta cella integra. Possibile causa: carico di merce effettuato alle 21:40 (consegna serale fornitore). Temperatura rientrata autonomamente. Nessuna azione sulla merce necessaria. Chiamata tecnico frigo pianificata per verifica guarnizione porta.
+              </div>
+              <div class="corrective-meta">
+                <div class="operator">Luisa Bianchi</div>
+                <div class="timestamp">07/07/2025 · 23:02</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ALLARME 3: senza azione correttiva — evidenziato in rosso -->
+        <div class="alarm-card severity-high">
+          <div class="alarm-header">
+            <div class="alarm-icon">🔴</div>
+            <div class="alarm-title">
+              Offline sensore — perdita comunicazione
+              <div class="alarm-sensor">Cella Frigo Carni — Piano -1 · A840411B11234501</div>
+            </div>
+            <div class="alarm-time">09/07 · 03:14 → 03:43</div>
+            <div class="alarm-duration">29 min</div>
+          </div>
+          <div class="alarm-detail">
+            <div class="alarm-stat">
+              <label>Tipo evento</label>
+              <span class="bad">Perdita segnale LoRa</span>
+            </div>
+            <div class="alarm-stat">
+              <label>Ultima lettura prima</label>
+              <span>+1.2°C · 03:13</span>
+            </div>
+            <div class="alarm-stat">
+              <label>Prima lettura dopo</label>
+              <span>+1.6°C · 03:43</span>
+            </div>
+          </div>
+          <div class="corrective-section" style="border-color: var(--danger); border-top: 1px solid var(--danger-light);">
+            <div class="corrective-label" style="color: var(--danger)">Azione Correttiva</div>
+            <div class="corrective-missing">
+              ⚠ Azione correttiva non ancora documentata — richiesta al responsabile il 09/07 alle 06:00 via email.
+              Accedere al portale entro 72 ore per completare la documentazione.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SEZIONE 5: CONFORMITÀ PERIODO -->
+    <section class="section compliance-section">
+      <div class="section-header">
+        <div class="section-number">5</div>
+        <div class="section-title">Valutazione Conformità Periodo</div>
+      </div>
+
+      <div class="compliance-box">
+        <div>
+          <div class="compliance-title">Conformità Complessiva Periodo</div>
+          <div class="compliance-sub">Reg. CE 852/2004 · Piano HACCP Aziendale · Luglio 2025</div>
+          <div class="compliance-bars">
+            <div class="comp-bar-item">
+              <label>Campionamenti OK</label>
+              <div class="comp-bar-track"><div class="comp-bar-fill" style="width:96.4%"></div></div>
+              <div class="comp-bar-val">96.4% — 2.776/2.880</div>
+            </div>
+            <div class="comp-bar-item">
+              <label>Azioni correttive</label>
+              <div class="comp-bar-track"><div class="comp-bar-fill warn" style="width:66.6%"></div></div>
+              <div class="comp-bar-val">66.6% — 2/3 documentate</div>
+            </div>
+            <div class="comp-bar-item">
+              <label>Uptime sistema</label>
+              <div class="comp-bar-track"><div class="comp-bar-fill" style="width:99.8%"></div></div>
+              <div class="comp-bar-val">99.8% — 29 min offline</div>
+            </div>
+          </div>
+        </div>
+        <div class="compliance-score">
+          <div class="pct">96,4%</div>
+          <div class="pct-label">Indice conformità</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SEZIONE 6: DICHIARAZIONE RESPONSABILE -->
+    <section class="section">
+      <div class="section-header">
+        <div class="section-number">6</div>
+        <div class="section-title">Dichiarazione del Responsabile HACCP</div>
+      </div>
+
+      <div class="declaration-box">
+        <p class="declaration-text">
+          Il sottoscritto, in qualità di responsabile del piano HACCP dell'esercizio indicato in intestazione, dichiara che i dati
+          riportati nel presente registro sono stati rilevati in modo automatico e continuativo dal sistema di monitoraggio IoT
+          certificato, nel rispetto del Reg. CE 852/2004. Le azioni correttive documentate sono state adottate
+          tempestivamente e in conformità alle procedure aziendali. Il registro è disponibile per la consultazione da parte
+          delle autorità competenti per un periodo non inferiore a 24 mesi dalla data di generazione.
+        </p>
+        <div class="signature-grid">
+          <div class="signature-field">
+            <label>Responsabile HACCP</label>
+            <div class="signature-line prefilled">{{ responsible_name }}</div>
+          </div>
+          <div class="signature-field">
+            <label>Data e luogo</label>
+            <div class="signature-line prefilled">{{ generated_date_display }} — {{ location_city }}</div>
+          </div>
+          <div class="signature-field">
+            <label>Firma</label>
+            <div class="signature-line">&nbsp;</div>
+          </div>
+          <div class="signature-field">
+            <label>Timbro esercizio</label>
+            <div class="signature-line">&nbsp;</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ================================================================
+       FOOTER INTEGRITÀ DOCUMENTO
+  ================================================================ -->
+  <footer class="integrity-footer">
+    <div>
+      <div class="integrity-hash">
+        <strong>SHA-256 Dataset Grezzo · Verifica Integrità</strong>
+        {{ sha256_hash }}
+      </div>
+      <div class="integrity-hash" style="margin-top:6px">
+        <strong>Report ID (UUID v4)</strong>
+        {{ report_uuid }}
+      </div>
+      <div class="integrity-hash" style="margin-top:6px; font-size:0.58rem; color:#4a6585">
+        Dataset raw disponibile su richiesta per verifica hash. Generato da MyMine HACCP Monitor v1.0 · LNS: Helium Network · ChirpStack v4
+      </div>
+    </div>
+    <div class="integrity-badge">
+      <div class="ibadge-icon">🔒</div>
+      <span class="ibadge-text">Integro &amp;<br>Verificabile</span>
+    </div>
+  </footer>
+
+  <div class="page-footer">
+    <span>MyMine Srl · Monitoraggio IoT HACCP · <a href="https://mymine.cloud">mymine.cloud</a></span>
+    <span>Report generato automaticamente · {{ generated_at_display }} UTC · Conservare per 24 mesi · Pag. 1/1</span>
+  </div>
+
+</div>
+</body>
+</html>
