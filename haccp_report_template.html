@@ -924,23 +924,12 @@
         <div class="sensor-card">
           <div class="sensor-dot"></div>
           <div class="sensor-info">
-            <div class="sensor-name">Cella Frigo Carni — Piano -1</div>
-            <div class="sensor-eui">DevEUI: A840411B11234501 · Milesight EM320-TH</div>
+            <div class="sensor-name">{{ sensor_name }}</div>
+            <div class="sensor-eui">DevEUI: {{ sensor_eui }} · {{ device_brand }}</div>
           </div>
           <div class="sensor-temp">
-            −1.4°C
-            <span class="range">soglia: −2° / +4°C</span>
-          </div>
-        </div>
-        <div class="sensor-card">
-          <div class="sensor-dot"></div>
-          <div class="sensor-info">
-            <div class="sensor-name">Banco Refrigerato Cucina</div>
-            <div class="sensor-eui">DevEUI: A840411B11234502 · Milesight EM320-TH</div>
-          </div>
-          <div class="sensor-temp">
-            +4.1°C
-            <span class="range">soglia: +2° / +6°C</span>
+            {{ t_avg_periodo }}°C
+            <span class="range">soglia: {{ t_min }}° / {{ t_max }}°C</span>
           </div>
         </div>
       </div>
@@ -950,7 +939,7 @@
     <section class="section">
       <div class="section-header">
         <div class="section-number">2</div>
-        <div class="section-title">Andamento Temperature — Ultimi 10 Giorni</div>
+        <div class="section-title">Andamento Temperature — {{ period_label }}</div>
       </div>
 
       <div class="chart-container">
@@ -1059,119 +1048,6 @@
 
       <div class="alarm-list">
         {{ alarms_html }}
-        <!-- ALLARME 1: con azione correttiva documentata -->
-        <div class="alarm-card severity-high" style="display:none">
-          <div class="alarm-header">
-            <div class="alarm-icon">🔴</div>
-            <div class="alarm-title">
-              Escursione termica — superamento soglia massima
-              <div class="alarm-sensor">Banco Refrigerato Cucina · A840411B11234502</div>
-            </div>
-            <div class="alarm-time">04/07 · 14:32 → 15:18</div>
-            <div class="alarm-duration">46 min</div>
-          </div>
-          <div class="alarm-detail">
-            <div class="alarm-stat">
-              <label>Valore rilevato (max)</label>
-              <span class="bad">+7.4°C</span>
-            </div>
-            <div class="alarm-stat">
-              <label>Soglia configurata</label>
-              <span>+6.0°C</span>
-            </div>
-            <div class="alarm-stat">
-              <label>Scarto dalla soglia</label>
-              <span class="bad">+1.4°C per 46 min</span>
-            </div>
-          </div>
-          <div class="corrective-section">
-            <div class="corrective-label">Azione Correttiva Documentata</div>
-            <div class="corrective-body">
-              <div class="corrective-text">
-                Porta banco rimasta socchiusa durante la preparazione mise en place del pranzo. Richiusa immediatamente al ricevimento dell'SMS di allarme. Controllo visivo dei prodotti: tutti integri, nessuno spostato. Temperatura rientrata in soglia alle 15:18. Prodotti ritenuti conformi — non ci sono stati interventi sulla merce.
-              </div>
-              <div class="corrective-meta">
-                <div class="operator">Mario Rossi</div>
-                <div class="timestamp">04/07/2025 · 15:24</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ALLARME 2: con azione correttiva documentata -->
-        <div class="alarm-card severity-medium">
-          <div class="alarm-header">
-            <div class="alarm-icon">🟡</div>
-            <div class="alarm-title">
-              Escursione termica — avvicinamento soglia
-              <div class="alarm-sensor">Cella Frigo Carni — Piano -1 · A840411B11234501</div>
-            </div>
-            <div class="alarm-time">07/07 · 22:05 → 22:51</div>
-            <div class="alarm-duration">46 min</div>
-          </div>
-          <div class="alarm-detail">
-            <div class="alarm-stat">
-              <label>Valore rilevato (max)</label>
-              <span class="warn">+5.1°C</span>
-            </div>
-            <div class="alarm-stat">
-              <label>Soglia configurata</label>
-              <span>+4.0°C</span>
-            </div>
-            <div class="alarm-stat">
-              <label>Scarto dalla soglia</label>
-              <span class="warn">+1.1°C per 46 min</span>
-            </div>
-          </div>
-          <div class="corrective-section">
-            <div class="corrective-label">Azione Correttiva Documentata</div>
-            <div class="corrective-body">
-              <div class="corrective-text">
-                Allarme notturno ricevuto via SMS. Chiamata al cuoco responsabile. Accesso verificato: porta cella integra. Possibile causa: carico di merce effettuato alle 21:40 (consegna serale fornitore). Temperatura rientrata autonomamente. Nessuna azione sulla merce necessaria. Chiamata tecnico frigo pianificata per verifica guarnizione porta.
-              </div>
-              <div class="corrective-meta">
-                <div class="operator">Luisa Bianchi</div>
-                <div class="timestamp">07/07/2025 · 23:02</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ALLARME 3: senza azione correttiva — evidenziato in rosso -->
-        <div class="alarm-card severity-high">
-          <div class="alarm-header">
-            <div class="alarm-icon">🔴</div>
-            <div class="alarm-title">
-              Offline sensore — perdita comunicazione
-              <div class="alarm-sensor">Cella Frigo Carni — Piano -1 · A840411B11234501</div>
-            </div>
-            <div class="alarm-time">09/07 · 03:14 → 03:43</div>
-            <div class="alarm-duration">29 min</div>
-          </div>
-          <div class="alarm-detail">
-            <div class="alarm-stat">
-              <label>Tipo evento</label>
-              <span class="bad">Perdita segnale LoRa</span>
-            </div>
-            <div class="alarm-stat">
-              <label>Ultima lettura prima</label>
-              <span>+1.2°C · 03:13</span>
-            </div>
-            <div class="alarm-stat">
-              <label>Prima lettura dopo</label>
-              <span>+1.6°C · 03:43</span>
-            </div>
-          </div>
-          <div class="corrective-section" style="border-color: var(--danger); border-top: 1px solid var(--danger-light);">
-            <div class="corrective-label" style="color: var(--danger)">Azione Correttiva</div>
-            <div class="corrective-missing">
-              ⚠ Azione correttiva non ancora documentata — richiesta al responsabile il 09/07 alle 06:00 via email.
-              Accedere al portale entro 72 ore per completare la documentazione.
-            </div>
-          </div>
-        </div>
-
-      </div>
     </section>
 
     <!-- SEZIONE 5: CONFORMITÀ PERIODO -->
@@ -1184,27 +1060,27 @@
       <div class="compliance-box">
         <div>
           <div class="compliance-title">Conformità Complessiva Periodo</div>
-          <div class="compliance-sub">Reg. CE 852/2004 · Piano HACCP Aziendale · Luglio 2025</div>
+          <div class="compliance-sub">Reg. CE 852/2004 · Piano HACCP Aziendale · {{ period_label }}</div>
           <div class="compliance-bars">
             <div class="comp-bar-item">
               <label>Campionamenti OK</label>
-              <div class="comp-bar-track"><div class="comp-bar-fill" style="width:96.4%"></div></div>
-              <div class="comp-bar-val">96.4% — 2.776/2.880</div>
+              <div class="comp-bar-track"><div class="comp-bar-fill" style="width:{{ comp_bar_width }}%"></div></div>
+              <div class="comp-bar-val">{{ compliance_pct }}% — {{ total_readings }} letture</div>
             </div>
             <div class="comp-bar-item">
               <label>Azioni correttive</label>
-              <div class="comp-bar-track"><div class="comp-bar-fill warn" style="width:66.6%"></div></div>
-              <div class="comp-bar-val">66.6% — 2/3 documentate</div>
+              <div class="comp-bar-track"><div class="comp-bar-fill warn" style="width:50%"></div></div>
+              <div class="comp-bar-val">{{ corrective_ok }} documentate</div>
             </div>
             <div class="comp-bar-item">
               <label>Uptime sistema</label>
-              <div class="comp-bar-track"><div class="comp-bar-fill" style="width:99.8%"></div></div>
-              <div class="comp-bar-val">99.8% — 29 min offline</div>
+              <div class="comp-bar-track"><div class="comp-bar-fill" style="width:{{ uptime_pct }}%"></div></div>
+              <div class="comp-bar-val">{{ uptime_pct }}% disponibilità</div>
             </div>
           </div>
         </div>
         <div class="compliance-score">
-          <div class="pct">96,4%</div>
+          <div class="pct">{{ compliance_pct }}%</div>
           <div class="pct-label">Indice conformità</div>
         </div>
       </div>
