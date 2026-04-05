@@ -894,28 +894,28 @@
       <div class="kpi-grid">
         <div class="kpi-card ok">
           <div class="kpi-label">Conformità globale</div>
-          <div class="kpi-value ok">96,4%</div>
+          <div class="kpi-value ok">{{ compliance_pct }}</div>
           <div class="kpi-sub">dei campionamenti entro soglia</div>
         </div>
         <div class="kpi-card neutral">
           <div class="kpi-label">Campionamenti totali</div>
-          <div class="kpi-value">2.880</div>
-          <div class="kpi-sub">ogni 15 min × 2 sensori × 10 gg</div>
+          <div class="kpi-value">{{ total_readings }}</div>
+          <div class="kpi-sub">letture nel periodo</div>
         </div>
         <div class="kpi-card danger">
           <div class="kpi-label">Allarmi temperatura</div>
-          <div class="kpi-value danger">3</div>
+          <div class="kpi-value danger">{{ alarm_count }}</div>
           <div class="kpi-sub">escursioni fuori soglia</div>
         </div>
         <div class="kpi-card ok">
           <div class="kpi-label">Azioni correttive</div>
-          <div class="kpi-value ok">2/3</div>
-          <div class="kpi-sub">documentate (1 mancante)</div>
+          <div class="kpi-value ok">{{ corrective_ok }}</div>
+          <div class="kpi-sub">documentate</div>
         </div>
         <div class="kpi-card neutral">
           <div class="kpi-label">Uptime sistema</div>
-          <div class="kpi-value">99,8%</div>
-          <div class="kpi-sub">minuti offline: 29</div>
+          <div class="kpi-value">{{ uptime_pct }}</div>
+          <div class="kpi-sub">disponibilità sensori</div>
         </div>
       </div>
 
@@ -1042,106 +1042,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>Lun 01/07</td>
-            <td>Cella Frigo Carni</td>
-            <td class="reading-ok">−1.8°C</td>
-            <td class="reading-ok">+2.1°C</td>
-            <td>+0.4°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
-          <tr>
-            <td>Lun 01/07</td>
-            <td>Banco Refrigerato</td>
-            <td class="reading-ok">+2.4°C</td>
-            <td class="reading-ok">+5.1°C</td>
-            <td>+3.8°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
-          <tr>
-            <td>Mar 02/07</td>
-            <td>Cella Frigo Carni</td>
-            <td class="reading-ok">−2.0°C</td>
-            <td class="reading-ok">+1.8°C</td>
-            <td>−0.1°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
-          <tr>
-            <td>Mar 02/07</td>
-            <td>Banco Refrigerato</td>
-            <td class="reading-ok">+2.1°C</td>
-            <td class="reading-ok">+5.8°C</td>
-            <td>+3.9°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
-          <tr>
-            <td>Mer 03/07</td>
-            <td>Cella Frigo Carni</td>
-            <td class="reading-ok">−1.5°C</td>
-            <td class="reading-ok">+2.4°C</td>
-            <td>+0.7°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
-          <tr>
-            <td>Mer 03/07</td>
-            <td>Banco Refrigerato</td>
-            <td class="reading-ok">+2.3°C</td>
-            <td class="reading-warn">+5.9°C</td>
-            <td>+4.2°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
-          <tr>
-            <td>Gio 04/07</td>
-            <td>Cella Frigo Carni</td>
-            <td class="reading-ok">−1.2°C</td>
-            <td class="reading-ok">+3.1°C</td>
-            <td>+1.4°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
-          <tr style="background:#fef9f9">
-            <td>Gio 04/07</td>
-            <td>Banco Refrigerato</td>
-            <td class="reading-ok">+2.8°C</td>
-            <td class="reading-bad">+7.4°C</td>
-            <td>+4.9°C</td>
-            <td>94</td>
-            <td>1 ⚠</td>
-            <td><span class="pill danger">ALLARME</span></td>
-          </tr>
-          <tr>
-            <td>Ven 05/07</td>
-            <td>Cella Frigo Carni</td>
-            <td class="reading-ok">−1.9°C</td>
-            <td class="reading-ok">+2.6°C</td>
-            <td>+0.3°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
-          <tr>
-            <td>Ven 05/07</td>
-            <td>Banco Refrigerato</td>
-            <td class="reading-ok">+2.0°C</td>
-            <td class="reading-ok">+5.4°C</td>
-            <td>+3.7°C</td>
-            <td>96</td>
-            <td>—</td>
-            <td><span class="pill ok">OK</span></td>
-          </tr>
+          {{ daily_html }}
         </tbody>
       </table>
       <p style="font-size:0.65rem; color:var(--neutral); margin-top:6px; text-align:right">
@@ -1157,9 +1058,9 @@
       </div>
 
       <div class="alarm-list">
-
+        {{ alarms_html }}
         <!-- ALLARME 1: con azione correttiva documentata -->
-        <div class="alarm-card severity-high">
+        <div class="alarm-card severity-high" style="display:none">
           <div class="alarm-header">
             <div class="alarm-icon">🔴</div>
             <div class="alarm-title">
