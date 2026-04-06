@@ -71,10 +71,8 @@
        LAYOUT PAGINA
     ============================================================ */
     .page {
-      max-width: 860px;
-      margin: 0 auto;
+      width: 100%;
       background: var(--white);
-      box-shadow: 0 4px 40px rgba(0,0,0,0.10);
     }
 
     /* ============================================================
@@ -894,7 +892,7 @@
       <div class="kpi-grid">
         <div class="kpi-card ok">
           <div class="kpi-label">Conformità globale</div>
-          <div class="kpi-value ok">{{ compliance_pct }}</div>
+          <div class="kpi-value ok">{{ compliance_pct }}%</div>
           <div class="kpi-sub">dei campionamenti entro soglia</div>
         </div>
         <div class="kpi-card neutral">
@@ -914,7 +912,7 @@
         </div>
         <div class="kpi-card neutral">
           <div class="kpi-label">Uptime sistema</div>
-          <div class="kpi-value">{{ uptime_pct }}</div>
+          <div class="kpi-value">{{ uptime_pct }}%</div>
           <div class="kpi-sub">disponibilità sensori</div>
         </div>
       </div>
@@ -935,77 +933,27 @@
       </div>
     </section>
 
-    <!-- SEZIONE 2: GRAFICO TEMPERATURE -->
+    <!-- SEZIONE 2: RIEPILOGO TEMPERATURE -->
     <section class="section">
       <div class="section-header">
         <div class="section-number">2</div>
-        <div class="section-title">Andamento Temperature — {{ period_label }}</div>
+        <div class="section-title">Riepilogo Temperature — {{ period_label }}</div>
       </div>
 
-      <div class="chart-container">
-        <div class="chart-legend">
-          <div class="chart-legend-item">
-            <div class="chart-legend-line" style="background:#2c5282"></div>
-            Cella Frigo Carni
+      <div class="chart-container" style="padding: 20px 16px;">
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: center;">
+          <div style="background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px; padding: 16px;">
+            <div style="font-size: 0.65rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-soft); margin-bottom: 6px;">Temperatura minima periodo</div>
+            <div style="font-family: var(--serif); font-size: 2rem; font-weight: 700; color: #2c5282;">{{ t_min_periodo }}°C</div>
           </div>
-          <div class="chart-legend-item">
-            <div class="chart-legend-line" style="background:#1a6b3c"></div>
-            Banco Refrigerato
+          <div style="background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px; padding: 16px;">
+            <div style="font-size: 0.65rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-soft); margin-bottom: 6px;">Temperatura media periodo</div>
+            <div style="font-family: var(--serif); font-size: 2rem; font-weight: 700; color: var(--accent);">{{ t_avg_periodo }}°C</div>
           </div>
-          <div class="chart-legend-item">
-            <div class="chart-legend-line" style="background:#b91c1c; border-top: 2px dashed #b91c1c; height:0;"></div>
-            Soglia max
+          <div style="background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px; padding: 16px;">
+            <div style="font-size: 0.65rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-soft); margin-bottom: 6px;">Temperatura massima periodo</div>
+            <div style="font-family: var(--serif); font-size: 2rem; font-weight: 700; color: var(--danger);">{{ t_max_periodo }}°C</div>
           </div>
-        </div>
-
-        <div class="chart-wrap">
-          <!-- SVG GRAFICO — in produzione generato da n8n/Chart.js server-side -->
-          <svg viewBox="0 0 760 160" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
-            <!-- Griglia -->
-            <defs>
-              <pattern id="grid" width="76" height="32" patternUnits="userSpaceOnUse">
-                <path d="M 76 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>
-              </pattern>
-            </defs>
-            <rect width="760" height="160" fill="url(#grid)"/>
-
-            <!-- Etichette asse Y -->
-            <text x="0" y="12" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">+8°</text>
-            <text x="0" y="44" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">+6°</text>
-            <text x="0" y="76" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">+4°</text>
-            <text x="0" y="108" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">+2°</text>
-            <text x="0" y="140" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace"> 0°</text>
-            <text x="0" y="160" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace">−2°</text>
-
-            <!-- Linea soglia max cella (4°C) — tratteggiata rossa -->
-            <line x1="18" y1="76" x2="760" y2="76" stroke="#b91c1c" stroke-width="1" stroke-dasharray="6,3" opacity="0.6"/>
-
-            <!-- Area Cella Frigo (valori simulati) -->
-            <polyline
-              points="20,148 96,140 172,135 248,152 324,130 400,145 476,160 552,138 628,143 704,150 760,146"
-              fill="none" stroke="#2c5282" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-
-            <!-- Area Banco Refrigerato -->
-            <polyline
-              points="20,100 96,92 172,88 248,76 324,84 400,72 476,80 552,92 628,86 704,94 760,90"
-              fill="none" stroke="#1a6b3c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-
-            <!-- Punto allarme (4° gg, valore fuori soglia banco = 72 in SVG ≈ 7.5°C) -->
-            <circle cx="248" cy="68" r="5" fill="#b91c1c" opacity="0.9"/>
-            <text x="248" y="62" text-anchor="middle" font-size="7" fill="#b91c1c" font-family="DM Mono, monospace">⚠ 7.4°C</text>
-
-            <!-- Etichette asse X -->
-            <text x="20"  y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">01/07</text>
-            <text x="96"  y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">02/07</text>
-            <text x="172" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">03/07</text>
-            <text x="248" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">04/07</text>
-            <text x="324" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">05/07</text>
-            <text x="400" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">06/07</text>
-            <text x="476" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">07/07</text>
-            <text x="552" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">08/07</text>
-            <text x="628" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">09/07</text>
-            <text x="704" y="172" font-size="8" fill="#94a3b8" font-family="DM Mono, monospace" text-anchor="middle">10/07</text>
-          </svg>
         </div>
       </div>
     </section>
@@ -1034,9 +982,7 @@
           {{ daily_html }}
         </tbody>
       </table>
-      <p style="font-size:0.65rem; color:var(--neutral); margin-top:6px; text-align:right">
-        Tabella troncata per leggibilità — report completo disponibile nel portale (10 giorni × 2 sensori = 20 righe)
-      </p>
+      
     </section>
 
     <!-- SEZIONE 4: EVENTI DI ALLARME E AZIONI CORRETTIVE -->
