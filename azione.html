@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>MyMine — Azione Correttiva</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --green:#1DB584;--green2:#0F9A6E;--dark:#1F4E3D;
+  --bg:#F0F6F3;--bg2:#fff;--line:#CEEADB;
+  --text:#1A3D30;--sub:#4E7367;--dim:#8DBDAF;
+  --red:#D94F4F;--amber:#D4891A;
+  --shadow:0 1px 8px rgba(26,61,48,.07);
+  --shadow-md:0 4px 20px rgba(26,61,48,.12);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Outfit',sans-serif;min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse 800px 500px at 80% -10%,rgba(29,181,132,.08) 0%,transparent 55%),
+             radial-gradient(ellipse 600px 400px at 10% 110%,rgba(29,181,132,.05) 0%,transparent 55%)}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:20px;
+  box-shadow:var(--shadow-md);max-width:540px;width:100%;overflow:hidden;position:relative;z-index:1}
+.card-header{background:linear-gradient(135deg,var(--dark),#2d6b54);padding:24px 28px}
+.logo{display:flex;align-items:center;gap:2px;margin-bottom:12px}
+.logo-my{color:var(--green);font-size:22px;font-weight:800}
+.logo-mine{color:#fff;font-size:22px;font-weight:800}
+.header-title{color:#fff;font-size:16px;font-weight:700;margin-bottom:4px}
+.header-sub{color:rgba(255,255,255,.6);font-size:12px;font-family:'JetBrains Mono',monospace}
+.card-body{padding:28px}
+.alarm-box{background:linear-gradient(135deg,#FEF2F2,#FFF5F5);border:1px solid rgba(217,79,79,.2);
+  border-radius:12px;padding:18px 20px;margin-bottom:22px}
+.alarm-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;
+  color:var(--red);margin-bottom:12px}
+.alarm-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.alarm-item label{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--dim);display:block;margin-bottom:3px}
+.alarm-item span{font-size:14px;font-weight:600;color:var(--text)}
+.alarm-item span.danger{color:var(--red)}
+.alarm-item.full{grid-column:1/-1}
+.form-label{font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;display:block}
+.form-label small{font-weight:400;color:var(--sub);margin-left:6px}
+textarea{width:100%;border:1.5px solid var(--line);border-radius:10px;padding:14px 16px;
+  font-family:'Outfit',sans-serif;font-size:14px;color:var(--text);background:var(--bg);
+  resize:vertical;min-height:120px;outline:none;transition:border-color .2s}
+textarea:focus{border-color:var(--green);background:#fff}
+textarea::placeholder{color:var(--dim)}
+.btn{width:100%;background:linear-gradient(135deg,var(--green),var(--green2));
+  color:#fff;border:none;border-radius:10px;padding:15px;font-family:'Outfit',sans-serif;
+  font-size:15px;font-weight:700;cursor:pointer;margin-top:16px;
+  box-shadow:0 4px 14px rgba(29,181,132,.3);transition:all .2s}
+.btn:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.success{display:none;text-align:center;padding:20px 0}
+.success-icon{font-size:52px;margin-bottom:12px}
+.success-title{font-size:20px;font-weight:800;color:var(--green2);margin-bottom:6px}
+.success-sub{font-size:13px;color:var(--sub)}
+.error-msg{background:#FEF2F2;border:1px solid rgba(217,79,79,.3);border-radius:8px;
+  padding:10px 14px;font-size:13px;color:var(--red);margin-top:12px;display:none}
+.loading{text-align:center;padding:40px 0;color:var(--sub)}
+.loading-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);
+  margin:0 3px;animation:bounce .8s ease infinite}
+.loading-dot:nth-child(2){animation-delay:.15s}
+.loading-dot:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.expired{text-align:center;padding:20px 0}
+.expired-icon{font-size:40px;margin-bottom:10px}
+.expired-title{font-size:16px;font-weight:700;color:var(--amber);margin-bottom:6px}
+.expired-sub{font-size:13px;color:var(--sub)}
+.footer{margin-top:20px;font-size:11px;color:var(--dim);text-align:center;font-family:'JetBrains Mono',monospace}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <div class="logo"><span class="logo-my">my</span><span class="logo-mine">mine</span></div>
+    <div class="header-title">Documentazione Azione Correttiva</div>
+    <div class="header-sub">Sistema HACCP — D.Lgs. 193/2007</div>
+  </div>
+  <div class="card-body">
+    <div class="loading" id="loading">
+      <div><span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span></div>
+      <p style="margin-top:12px;font-size:13px">Caricamento dati allarme...</p>
+    </div>
+    <div id="main" style="display:none">
+      <div class="alarm-box">
+        <div class="alarm-title">⚠ Allarme temperatura rilevato</div>
+        <div class="alarm-grid">
+          <div class="alarm-item full">
+            <label>Frigorifero</label>
+            <span id="sensor_name">—</span>
+          </div>
+          <div class="alarm-item full">
+            <label>Indirizzo</label>
+            <span id="location_name">—</span>
+          </div>
+          <div class="alarm-item">
+            <label>Temperatura rilevata</label>
+            <span class="danger" id="temp_value">—</span>
+          </div>
+          <div class="alarm-item">
+            <label>Soglia massima</label>
+            <span id="threshold_value">—</span>
+          </div>
+          <div class="alarm-item full">
+            <label>Allarme aperto il</label>
+            <span id="started_at">—</span>
+          </div>
+        </div>
+      </div>
+      <label class="form-label">Descrivi l'azione correttiva intrapresa <small>obbligatorio</small></label>
+      <textarea id="action_text" placeholder="Es: Verificato guasto al termostato. Spostati i prodotti nel frigo di riserva. Contattato tecnico per riparazione prevista il..."></textarea>
+      <div class="error-msg" id="error_msg"></div>
+      <button class="btn" id="submit_btn" onclick="submitAction()">✓ Salva azione correttiva</button>
+    </div>
+    <div class="success" id="success">
+      <div class="success-icon">✅</div>
+      <div class="success-title">Azione correttiva registrata</div>
+      <div class="success-sub">La documentazione è stata salvata nel sistema HACCP.<br>Puoi chiudere questa pagina.</div>
+    </div>
+    <div class="expired" id="expired" style="display:none">
+      <div class="expired-icon">⏱</div>
+      <div class="expired-title">Link non valido o scaduto</div>
+      <div class="expired-sub">Il link potrebbe essere già stato utilizzato o è scaduto.<br>Contatta MyMine per assistenza.</div>
+    </div>
+  </div>
+</div>
+<div class="footer">© 2026 MyMine Srl — info@mymine.io</div>
+
+<script>
+const token = new URLSearchParams(location.search).get('token');
+
+async function loadAlarm() {
+  if (!token) { showExpired(); return; }
+  try {
+    const r = await fetch('/api/azione?token=' + token);
+    const d = await r.json();
+    if (!r.ok || !d.ok) { showExpired(); return; }
+    if (d.status === 'CLOSED') { showSuccess(); return; }
+    const a = d.alarm;
+    document.getElementById('sensor_name').textContent = a.sensor_name || '—';
+    document.getElementById('location_name').textContent = a.location_name || '—';
+    document.getElementById('temp_value').textContent = a.temp_value + '°C';
+    document.getElementById('threshold_value').textContent = a.threshold_value + '°C';
+    const dt = new Date(a.started_at);
+    document.getElementById('started_at').textContent = dt.toLocaleString('it-IT');
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('main').style.display = 'block';
+  } catch(e) { showExpired(); }
+}
+
+async function submitAction() {
+  const text = document.getElementById('action_text').value.trim();
+  const err = document.getElementById('error_msg');
+  if (!text) { err.textContent = 'Inserisci una descrizione dell\'azione correttiva.'; err.style.display='block'; return; }
+  err.style.display = 'none';
+  const btn = document.getElementById('submit_btn');
+  btn.disabled = true; btn.textContent = 'Salvataggio...';
+  try {
+    const r = await fetch('/api/azione', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({token, action_text: text})
+    });
+    const d = await r.json();
+    if (d.ok) { showSuccess(); }
+    else { err.textContent = d.error || 'Errore durante il salvataggio.'; err.style.display='block'; btn.disabled=false; btn.textContent='✓ Salva azione correttiva'; }
+  } catch(e) { err.textContent = 'Errore di rete. Riprova.'; err.style.display='block'; btn.disabled=false; btn.textContent='✓ Salva azione correttiva'; }
+}
+
+function showSuccess() {
+  document.getElementById('loading').style.display='none';
+  document.getElementById('main').style.display='none';
+  document.getElementById('success').style.display='block';
+}
+function showExpired() {
+  document.getElementById('loading').style.display='none';
+  document.getElementById('expired').style.display='block';
+}
+
+loadAlarm();
+</script>
+</body>
+</html>
