@@ -2716,6 +2716,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed=urlparse(self.path); qs=parse_qs(parsed.query); path=parsed.path
 
         # ── Public routes ──
+        if path == "/azione":
+            try:
+                import os as _o3
+                _f = _o3.path.join(_o3.path.dirname(__file__), "azione.html")
+                self.send_html(open(_f, encoding="utf-8").read()); return
+            except:
+                self.send_response(404); self.end_headers(); return
         if path == "/onboarding":
             try:
                 import os as _os2
@@ -2745,6 +2752,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except: pass
             self.send_json({"ok":True,"data_file":DATA,"writable":writable,
                 "clients":len(load_clients()),"build":BUILD_TS})
+            return
+        if path == "/api/azione":
+            tq=qs.get("token",[None])[0]
+            if not tq: self.send_json({"ok":False,"error":"token mancante"},400); return
+            conn=_pg_conn()
+            if not conn: self.send_json({"ok":False,"error":"DB non disponibile"},500); return
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id,sensor_name,location_name,temp_value,threshold_value,started_at,status FROM alarms WHERE token=%s",(tq,))
+                    row=cur.fetchone()
+                if not row: self.send_json({"ok":False,"error":"token non valido"},404); return
+                self.send_json({"ok":True,"alarm":{"id":str(row[0]),"sensor_name":row[1],"location_name":row[2],"temp_value":float(row[3]),"threshold_value":float(row[4]),"started_at":row[5].isoformat(),"status":row[6]}})
+            except Exception as e: self.send_json({"ok":False,"error":str(e)},500)
+            finally: conn.close()
             return
         if path == "/api/sensori":
             # Leggi sensori.txt e filtra quelli già assegnati
@@ -3139,6 +3160,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 import traceback
                 print(f"  [UPLINK] errore: {e}\n{traceback.format_exc()}")
                 self.send_json({"ok": False, "error": str(e)}, 500)
+            return
+        if self.path=="/api/azione":
+            try:
+                length=int(self.headers.get("Content-Length",0))
+                body=json.loads(self.rfile.read(length))
+                tp=body.get("token",""); at=body.get("action_text","").strip()
+                if not tp or not at: self.send_json({"ok":False,"error":"campi mancanti"},400); return
+                conn=_pg_conn()
+                if not conn: self.send_json({"ok":False,"error":"DB non disponibile"},500); return
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT id,status FROM alarms WHERE token=%s",(tp,))
+                        row=cur.fetchone()
+                    if not row: self.send_json({"ok":False,"error":"token non valido"},404); return
+                    if row[1]=="CLOSED": self.send_json({"ok":False,"error":"gia chiuso"},400); return
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE alarms SET action_text=%s,action_recorded_at=NOW(),status='CLOSED' WHERE token=%s",(at,tp))
+                    conn.commit(); self.send_json({"ok":True})
+                except Exception as e: self.send_json({"ok":False,"error":str(e)},500)
+                finally: conn.close()
+            except Exception as e: self.send_json({"ok":False,"error":str(e)},500)
             return
         if self.path=="/api/import":
             sess=self._get_sess()
