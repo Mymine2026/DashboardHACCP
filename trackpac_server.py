@@ -3090,7 +3090,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else: self.send_response(404); self.end_headers()
 
     def do_POST(self):
-        if self.path=="/api/uplink":
+        if self.path.startswith("/api/uplink"):
             """
             Riceve uplink da ChirpStack HTTP Integration.
             Configura in ChirpStack:
