@@ -660,7 +660,7 @@ def _rows_ogni_4h(rows, target_date, sensore_nome):
             })
     return result
 
-def generate_pdf_report(client, tipo="giornaliero"):
+def generate_pdf_report(client, tipo="giornaliero", anno=None, mese=None):
     """
     Genera PDF HACCP.
     tipo='giornaliero': misurazioni di ieri ogni 4 ore (inviato alle 09:00)
@@ -688,9 +688,14 @@ def generate_pdf_report(client, tipo="giornaliero"):
                 rows_4h = _rows_ogni_4h(rows, yday, sname)
                 mese_anno = MESI_IT[yday.month] + " " + str(yday.year)
             else:  # mensile
-                first_today = datetime.now().date().replace(day=1)
-                last_month_end = first_today - timedelta(days=1)
-                last_month_start = last_month_end.replace(day=1)
+                if anno and mese:
+                    import calendar
+                    last_month_start = datetime(int(anno), int(mese), 1).date()
+                    last_month_end = datetime(int(anno), int(mese), calendar.monthrange(int(anno), int(mese))[1]).date()
+                else:
+                    first_today = datetime.now().date().replace(day=1)
+                    last_month_end = first_today - timedelta(days=1)
+                    last_month_start = last_month_end.replace(day=1)
                 rows_4h = []
                 d = last_month_start
                 while d <= last_month_end:
@@ -3044,12 +3049,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not client: self.send_json({"error":"not found"},404); return
             tipo=qs.get("tipo",["giornaliero"])[0]
             if tipo not in ("giornaliero","mensile"): tipo="giornaliero"
-            pdf,err=generate_pdf_report(client, tipo=tipo)
+            _anno=qs.get("anno",[None])[0]
+            _mese=qs.get("mese",[None])[0]
+            pdf,err=generate_pdf_report(client, tipo=tipo, anno=_anno, mese=_mese)
             if err: self.send_json({"error":err},500); return
             if tipo=="mensile":
-                _first=datetime.now().date().replace(day=1)
-                _lm=(_first-timedelta(days=1))
-                dt_str=_lm.strftime("%Y%m"); lbl="mensile"
+                if _anno and _mese:
+                    dt_str="{:04d}{:02d}".format(int(_anno),int(_mese)); lbl="mensile"
+                else:
+                    _first=datetime.now().date().replace(day=1)
+                    _lm=(_first-timedelta(days=1))
+                    dt_str=_lm.strftime("%Y%m"); lbl="mensile"
             else:
                 dt_str=(datetime.now()-timedelta(days=1)).strftime("%Y%m%d"); lbl="giornaliero"
             eui_last=(client.get("sensori",[{}])[0].get("eui","") or client.get("eui",""))[-6:]
