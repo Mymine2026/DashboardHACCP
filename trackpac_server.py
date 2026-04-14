@@ -3049,7 +3049,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not client: self.send_json({"error":"not found"},404); return
             mesi=["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
             opts="".join(["<option value={y}-{m:02d}>{nm} {y}</option>".format(y=y,m=m,nm=mesi[m-1]) for y in [2025,2026] for m in range(1,13)])
-            btn='<button onclick="var v=document.getElementById(chr(39)+"s"+chr(39)).value;var p=v.split(chr(39)+"-"+chr(39));location.href=chr(39)+"/report?client='+ci+'&tipo=mensile&anno="+p[0]+"&mese="+p[1]">Scarica PDF</button>'
+            btn="<button onclick='var v=document.getElementById(\"s\").value;var p=v.split(\"-\");location.href=\"/report?client=" + str(ci) + "&tipo=mensile&anno=\"+p[0]+\"&mese=\"+p[1]'>Scarica PDF</button>"
             html="<!DOCTYPE html><html><head><meta charset=UTF-8><title>Report</title><style>body{font-family:sans-serif;padding:40px}select,button{padding:10px;font-size:16px;margin:10px;border-radius:8px}button{background:#1DB584;color:#fff;border:none;cursor:pointer}</style></head><body><h2>Report Mensile</h2><select id=s>"+opts+"</select>"+btn+"</body></html>"
             self.send_response(200); self.send_header("Content-Type","text/html; charset=utf-8"); self.end_headers(); self.wfile.write(html.encode()); return
         elif path=="/report":
