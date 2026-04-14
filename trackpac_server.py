@@ -660,6 +660,26 @@ def _rows_ogni_4h(rows, target_date, sensore_nome):
             })
     return result
 
+def _rows_riepilogo_giornaliero(rows, target_date, sensore_nome):
+    """1 riga per giorno con min/max/media - per report mensile."""
+    temps = [r["T"] for r in rows if r.get("T") is not None and r["ts"].date() == target_date]
+    hums  = [r["H"] for r in rows if r.get("H") is not None and r["ts"].date() == target_date]
+    T_min  = round(min(temps), 1) if temps else None
+    T_max  = round(max(temps), 1) if temps else None
+    T_avg  = round(sum(temps)/len(temps), 1) if temps else None
+    H_min  = round(min(hums), 0) if hums else None
+    H_max  = round(max(hums), 0) if hums else None
+    return {
+        "giorno":  target_date.strftime("%d/%m/%Y"),
+        "sensore": sensore_nome,
+        "T_min":   T_min,
+        "T_max":   T_max,
+        "T_avg":   T_avg,
+        "H_min":   H_min,
+        "H_max":   H_max,
+        "n_misure": len(temps),
+    }
+
 def generate_pdf_report(client, tipo="giornaliero", anno=None, mese=None):
     """
     Genera PDF HACCP.
@@ -700,7 +720,7 @@ def generate_pdf_report(client, tipo="giornaliero", anno=None, mese=None):
                 d = last_month_start
                 while d <= last_month_end:
                     day_rows = _fetch_frames(dev_id, d)
-                    rows_4h.extend(_rows_ogni_4h(day_rows, d, sname))
+                    rows_4h.append(_rows_riepilogo_giornaliero(day_rows, d, sname))
                     d += timedelta(days=1)
                 mese_anno = MESI_IT[last_month_end.month] + " " + str(last_month_end.year)
 
@@ -747,7 +767,12 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
     RED   = "0.75 0.05 0.05"
 
     # cols: Giorno|Ora|Sensore|Temp|Umid|Note|Azioni  — sum=525
-    COLS  = [50, 34, 110, 52, 48, 116, 115]
+    if tipo == "mensile":
+        COLS  = [55, 85, 55, 55, 60, 45, 45, 125]
+        CLBLS = ["Giorno","Sensore","T.Min(C)","T.Max(C)","T.Med(C)","H%Min","H%Max","Conforme/Anomalie"]
+    else:
+        COLS  = [50, 34, 110, 52, 48, 116, 115]
+        CLBLS = ["Giorno","Ora","Sensore","Temp.(C)","Umid.(%)","Note / Anomalie","Azioni Correttive"]
     CLBLS = ["Giorno","Ora","Sensore","Temp.(C)","Umid.(%)","Note / Anomalie","Azioni Correttive"]
     RH    = 17
 
@@ -851,18 +876,35 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
         _so   = row.get("_sens",{})
         t_min = _so.get("t_min") if isinstance(_so,dict) else None
         t_max = _so.get("t_max") if isinstance(_so,dict) else None
-        alarm = (T_val is not None and
-                 ((t_min is not None and T_val<t_min) or
-                  (t_max is not None and T_val>t_max)))
-        if alarm: bg = "1.0 0.88 0.88"
-        filledbox(LM, y-RH, TW, RH, bg)
-        hline(y-RH, lw=0.2, rgb=LGREY)
-        vals = [
-            row.get("giorno",""), row.get("ora",""), row.get("sensore","")[:22],
-            fmt(T_val) if T_val is not None else "",
-            fmt(row.get("H"),0) if row.get("H") is not None else "",
-            "", "",
-        ]
+        if tipo == "mensile":
+            T_min = row.get("T_min"); T_max_v = row.get("T_max"); T_avg = row.get("T_avg")
+            H_min = row.get("H_min"); H_max_v = row.get("H_max")
+            alarm = (T_max_v is not None and t_max is not None and T_max_v > t_max) or                     (T_min is not None and t_min is not None and T_min < t_min)
+            if alarm: bg = "1.0 0.88 0.88"
+            filledbox(LM, y-RH, TW, RH, bg)
+            hline(y-RH, lw=0.2, rgb=LGREY)
+            vals = [
+                row.get("giorno",""), row.get("sensore","")[:18],
+                fmt(T_min) if T_min is not None else "—",
+                fmt(T_max_v) if T_max_v is not None else "—",
+                fmt(T_avg) if T_avg is not None else "—",
+                fmt(H_min,0) if H_min is not None else "—",
+                fmt(H_max_v,0) if H_max_v is not None else "—",
+                "",
+            ]
+        else:
+            alarm = (T_val is not None and
+                     ((t_min is not None and T_val<t_min) or
+                      (t_max is not None and T_val>t_max)))
+            if alarm: bg = "1.0 0.88 0.88"
+            filledbox(LM, y-RH, TW, RH, bg)
+            hline(y-RH, lw=0.2, rgb=LGREY)
+            vals = [
+                row.get("giorno",""), row.get("ora",""), row.get("sensore","")[:22],
+                fmt(T_val) if T_val is not None else "",
+                fmt(row.get("H"),0) if row.get("H") is not None else "",
+                "", "",
+            ]
         cx = LM
         for i,(v,cw) in enumerate(zip(vals,COLS)):
             col = RED if (alarm and i==3) else BLACK
@@ -3048,38 +3090,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             client=clients[int(ci)] if ci and ci.isdigit() and int(ci)<len(clients) else None
             if not client: self.send_json({"error":"not found"},404); return
             mesi=["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
-            opts_parts=[]
-            for y in [2025,2026]:
-                for m in range(1,13):
-                    opts_parts.append("<option value='" + str(y) + "-" + str(m).zfill(2) + "'>" + mesi[m-1] + " " + str(y) + "</option>")
-            opts="".join(opts_parts)
-            report_url="/report?client=" + str(ci) + "&tipo=mensile&anno="
-            page_html="""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Report Mensile MyMine</title>
-<style>body{font-family:sans-serif;padding:40px;background:#F0F6F3}
-h2{color:#1A3D30;margin-bottom:20px}label{display:block;color:#4E7367;margin-bottom:8px;font-size:14px}
-select{padding:10px 16px;font-size:15px;border:1px solid #AEDCC8;border-radius:8px;background:#fff;margin-bottom:16px;display:block;min-width:220px}
-button{padding:12px 24px;font-size:15px;background:#1DB584;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600}
-button:hover{background:#0F9A6E}</style></head>
-<body><h2>&#8595; Scarica Report Mensile</h2>
-<label>Seleziona il mese:</label>
-<select id="mese">OPTS_PLACEHOLDER</select>
-<button onclick="goReport()">Scarica PDF</button>
-<script>
-function goReport(){
-  var sel=document.getElementById("mese");
-  var val=sel.value;
-  var parts=val.split("-");
-  var anno=parts[0]; var mese=parts[1];
-  window.location.href="REPORT_URL_PLACEHOLDER"+anno+"&mese="+mese;
-}
-</script></body></html>"""
-            page_html=page_html.replace("OPTS_PLACEHOLDER", opts).replace("REPORT_URL_PLACEHOLDER", report_url)
-            b=page_html.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type","text/html; charset=utf-8")
-            self.send_header("Content-Length",str(len(b)))
-            self.end_headers(); self.wfile.write(b); return
+            opts="".join(["<option value={y}-{m:02d}>{nm} {y}</option>".format(y=y,m=m,nm=mesi[m-1]) for y in [2025,2026] for m in range(1,13)])
+            btn='<button onclick="var v=document.getElementById(chr(39)+"s"+chr(39)).value;var p=v.split(chr(39)+"-"+chr(39));location.href=chr(39)+"/report?client='+ci+'&tipo=mensile&anno="+p[0]+"&mese="+p[1]">Scarica PDF</button>'
+            html="<!DOCTYPE html><html><head><meta charset=UTF-8><title>Report</title><style>body{font-family:sans-serif;padding:40px}select,button{padding:10px;font-size:16px;margin:10px;border-radius:8px}button{background:#1DB584;color:#fff;border:none;cursor:pointer}</style></head><body><h2>Report Mensile</h2><select id=s>"+opts+"</select>"+btn+"</body></html>"
+            self.send_response(200); self.send_header("Content-Type","text/html; charset=utf-8"); self.end_headers(); self.wfile.write(html.encode()); return
         elif path=="/report":
             ci=qs.get("client",[None])[0]; clients=load_clients()
             client=clients[int(ci)] if ci and ci.isdigit() and int(ci)<len(clients) else None
