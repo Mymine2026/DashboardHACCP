@@ -3048,10 +3048,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
             client=clients[int(ci)] if ci and ci.isdigit() and int(ci)<len(clients) else None
             if not client: self.send_json({"error":"not found"},404); return
             mesi=["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
-            opts="".join(["<option value={y}-{m:02d}>{nm} {y}</option>".format(y=y,m=m,nm=mesi[m-1]) for y in [2025,2026] for m in range(1,13)])
-            btn="<button onclick='var v=document.getElementById(\"s\").value;var p=v.split(\"-\");location.href=\"/report?client=" + str(ci) + "&tipo=mensile&anno=\"+p[0]+\"&mese=\"+p[1]'>Scarica PDF</button>"
-            html="<!DOCTYPE html><html><head><meta charset=UTF-8><title>Report</title><style>body{font-family:sans-serif;padding:40px}select,button{padding:10px;font-size:16px;margin:10px;border-radius:8px}button{background:#1DB584;color:#fff;border:none;cursor:pointer}</style></head><body><h2>Report Mensile</h2><select id=s>"+opts+"</select>"+btn+"</body></html>"
-            self.send_response(200); self.send_header("Content-Type","text/html; charset=utf-8"); self.end_headers(); self.wfile.write(html.encode()); return
+            opts_parts=[]
+            for y in [2025,2026]:
+                for m in range(1,13):
+                    opts_parts.append("<option value='" + str(y) + "-" + str(m).zfill(2) + "'>" + mesi[m-1] + " " + str(y) + "</option>")
+            opts="".join(opts_parts)
+            report_url="/report?client=" + str(ci) + "&tipo=mensile&anno="
+            page_html="""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Report Mensile MyMine</title>
+<style>body{font-family:sans-serif;padding:40px;background:#F0F6F3}
+h2{color:#1A3D30;margin-bottom:20px}label{display:block;color:#4E7367;margin-bottom:8px;font-size:14px}
+select{padding:10px 16px;font-size:15px;border:1px solid #AEDCC8;border-radius:8px;background:#fff;margin-bottom:16px;display:block;min-width:220px}
+button{padding:12px 24px;font-size:15px;background:#1DB584;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600}
+button:hover{background:#0F9A6E}</style></head>
+<body><h2>&#8595; Scarica Report Mensile</h2>
+<label>Seleziona il mese:</label>
+<select id="mese">OPTS_PLACEHOLDER</select>
+<button onclick="goReport()">Scarica PDF</button>
+<script>
+function goReport(){
+  var sel=document.getElementById("mese");
+  var val=sel.value;
+  var parts=val.split("-");
+  var anno=parts[0]; var mese=parts[1];
+  window.location.href="REPORT_URL_PLACEHOLDER"+anno+"&mese="+mese;
+}
+</script></body></html>"""
+            page_html=page_html.replace("OPTS_PLACEHOLDER", opts).replace("REPORT_URL_PLACEHOLDER", report_url)
+            b=page_html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type","text/html; charset=utf-8")
+            self.send_header("Content-Length",str(len(b)))
+            self.end_headers(); self.wfile.write(b); return
         elif path=="/report":
             ci=qs.get("client",[None])[0]; clients=load_clients()
             client=clients[int(ci)] if ci and ci.isdigit() and int(ci)<len(clients) else None
