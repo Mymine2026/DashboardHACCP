@@ -700,7 +700,7 @@ def _send_chirpstack_downlink(dev_eui, payload_bytes, fport=85):
         }).encode()
         req = urllib.request.Request(url, data=body,
               headers={"Content-Type": "application/json",
-                       "Grpc-Metadata-Authorization": f"Bearer {CHIRPSTACK_API_KEY}"},
+                       "Authorization": f"Bearer {CHIRPSTACK_API_KEY}"},
               method="POST")
         with urllib.request.urlopen(req, timeout=5) as resp:
             result = resp.read()
