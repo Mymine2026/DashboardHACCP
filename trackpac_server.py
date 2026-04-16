@@ -660,25 +660,77 @@ def _rows_ogni_4h(rows, target_date, sensore_nome):
             })
     return result
 
-def _rows_riepilogo_giornaliero(rows, target_date, sensore_nome):
-    """1 riga per giorno con min/max/media - per report mensile."""
-    temps = [r["T"] for r in rows if r.get("T") is not None and r["ts"].date() == target_date]
-    hums  = [r["H"] for r in rows if r.get("H") is not None and r["ts"].date() == target_date]
-    T_min  = round(min(temps), 1) if temps else None
-    T_max  = round(max(temps), 1) if temps else None
-    T_avg  = round(sum(temps)/len(temps), 1) if temps else None
-    H_min  = round(min(hums), 0) if hums else None
-    H_max  = round(max(hums), 0) if hums else None
-    return {
-        "giorno":  target_date.strftime("%d/%m/%Y"),
-        "sensore": sensore_nome,
-        "T_min":   T_min,
-        "T_max":   T_max,
-        "T_avg":   T_avg,
-        "H_min":   H_min,
-        "H_max":   H_max,
-        "n_misure": len(temps),
-    }
+
+# ── ChirpStack Downlink ─────────────────────────────────────────────────────
+CHIRPSTACK_URL = "http://72.62.45.209:8080"
+CHIRPSTACK_API_KEY = "cc0628e1-0c8a-4d75-8b89-ca192a63095e"
+
+def _build_em320_threshold_payload(t_min, t_max):
+    """
+    Costruisce il payload downlink EM320-TH per impostare le soglie temperatura.
+    condition=outside(4) con alarm bit temperatura(8) -> byte=0x0C
+    FPort: 85
+    """
+    import struct
+    condition_byte = 0x0C  # outside=4 | temp_alarm_bit=8
+    t_min_raw = int(round(t_min * 10))
+    t_max_raw = int(round(t_max * 10))
+    # ff 06 <cond> <tmin_LE 2B> <tmax_LE 2B> <hmin_LE 2B=0> <hmax_LE 2B=0>
+    payload = struct.pack('<BBhh4x', 0xFF, 0x06, condition_byte, t_min_raw, t_max_raw)
+    # Nota: struct non ha 'h' come terzo campo, riscriviamo
+    import struct as s
+    buf = bytes([0xFF, 0x06, condition_byte])
+    buf += s.pack('<h', t_min_raw)
+    buf += s.pack('<h', t_max_raw)
+    buf += bytes(4)  # humidity thresholds = 0
+    return buf
+
+def _send_chirpstack_downlink(dev_eui, payload_bytes, fport=85):
+    """
+    Invia un downlink a ChirpStack v4 via REST API.
+    dev_eui: stringa tipo '24e124785e314342'
+    """
+    import base64, urllib.request, urllib.error
+    try:
+        import json as _json
+        b64 = base64.b64encode(payload_bytes).decode()
+        url = f"{CHIRPSTACK_URL}/api/devices/{dev_eui}/queue"
+        body = _json.dumps({
+            "queueItem": {
+                "confirmed": False,
+                "fPort": fport,
+                "data": b64
+            }
+        }).encode()
+        req = urllib.request.Request(url, data=body,
+              headers={"Content-Type": "application/json",
+                       "Grpc-Metadata-Authorization": f"Bearer {CHIRPSTACK_API_KEY}"},
+              method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = resp.read()
+            print(f"  [CS-DL] Downlink inviato a {dev_eui} FPort={fport}: {result[:80]}")
+            return True
+    except Exception as e:
+        print(f"  [CS-DL] Errore downlink {dev_eui}: {e}")
+        return False
+
+def _sync_thresholds_to_sensors(client):
+    """
+    Per ogni sensore del client che ha t_min/t_max configurati,
+    invia il downlink di configurazione soglie a ChirpStack.
+    """
+    sensori = client.get("sensori", [{"eui": client.get("eui", "")}])
+    for s in sensori:
+        eui = s.get("eui", "").lower().replace(" ", "")
+        if not eui:
+            continue
+        t_min = s.get("t_min") if s.get("t_min") is not None else client.get("t_min")
+        t_max = s.get("t_max") if s.get("t_max") is not None else client.get("t_max")
+        if t_min is None or t_max is None:
+            print(f"  [CS-DL] Salto {eui}: soglie non configurate")
+            continue
+        payload = _build_em320_threshold_payload(float(t_min), float(t_max))
+        _send_chirpstack_downlink(eui, payload)
 
 def generate_pdf_report(client, tipo="giornaliero", anno=None, mese=None):
     """
@@ -720,7 +772,7 @@ def generate_pdf_report(client, tipo="giornaliero", anno=None, mese=None):
                 d = last_month_start
                 while d <= last_month_end:
                     day_rows = _fetch_frames(dev_id, d)
-                    rows_4h.append(_rows_riepilogo_giornaliero(day_rows, d, sname))
+                    rows_4h.extend(_rows_ogni_4h(day_rows, d, sname))
                     d += timedelta(days=1)
                 mese_anno = MESI_IT[last_month_end.month] + " " + str(last_month_end.year)
 
@@ -767,12 +819,7 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
     RED   = "0.75 0.05 0.05"
 
     # cols: Giorno|Ora|Sensore|Temp|Umid|Note|Azioni  — sum=525
-    if tipo == "mensile":
-        COLS  = [55, 85, 55, 55, 60, 45, 45, 125]
-        CLBLS = ["Giorno","Sensore","T.Min(C)","T.Max(C)","T.Med(C)","H%Min","H%Max","Conforme/Anomalie"]
-    else:
-        COLS  = [50, 34, 110, 52, 48, 116, 115]
-        CLBLS = ["Giorno","Ora","Sensore","Temp.(C)","Umid.(%)","Note / Anomalie","Azioni Correttive"]
+    COLS  = [50, 34, 110, 52, 48, 116, 115]
     CLBLS = ["Giorno","Ora","Sensore","Temp.(C)","Umid.(%)","Note / Anomalie","Azioni Correttive"]
     RH    = 17
 
@@ -876,35 +923,18 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
         _so   = row.get("_sens",{})
         t_min = _so.get("t_min") if isinstance(_so,dict) else None
         t_max = _so.get("t_max") if isinstance(_so,dict) else None
-        if tipo == "mensile":
-            T_min = row.get("T_min"); T_max_v = row.get("T_max"); T_avg = row.get("T_avg")
-            H_min = row.get("H_min"); H_max_v = row.get("H_max")
-            alarm = (T_max_v is not None and t_max is not None and T_max_v > t_max) or                     (T_min is not None and t_min is not None and T_min < t_min)
-            if alarm: bg = "1.0 0.88 0.88"
-            filledbox(LM, y-RH, TW, RH, bg)
-            hline(y-RH, lw=0.2, rgb=LGREY)
-            vals = [
-                row.get("giorno",""), row.get("sensore","")[:18],
-                fmt(T_min) if T_min is not None else "—",
-                fmt(T_max_v) if T_max_v is not None else "—",
-                fmt(T_avg) if T_avg is not None else "—",
-                fmt(H_min,0) if H_min is not None else "—",
-                fmt(H_max_v,0) if H_max_v is not None else "—",
-                "",
-            ]
-        else:
-            alarm = (T_val is not None and
-                     ((t_min is not None and T_val<t_min) or
-                      (t_max is not None and T_val>t_max)))
-            if alarm: bg = "1.0 0.88 0.88"
-            filledbox(LM, y-RH, TW, RH, bg)
-            hline(y-RH, lw=0.2, rgb=LGREY)
-            vals = [
-                row.get("giorno",""), row.get("ora",""), row.get("sensore","")[:22],
-                fmt(T_val) if T_val is not None else "",
-                fmt(row.get("H"),0) if row.get("H") is not None else "",
-                "", "",
-            ]
+        alarm = (T_val is not None and
+                 ((t_min is not None and T_val<t_min) or
+                  (t_max is not None and T_val>t_max)))
+        if alarm: bg = "1.0 0.88 0.88"
+        filledbox(LM, y-RH, TW, RH, bg)
+        hline(y-RH, lw=0.2, rgb=LGREY)
+        vals = [
+            row.get("giorno",""), row.get("ora",""), row.get("sensore","")[:22],
+            fmt(T_val) if T_val is not None else "",
+            fmt(row.get("H"),0) if row.get("H") is not None else "",
+            "", "",
+        ]
         cx = LM
         for i,(v,cw) in enumerate(zip(vals,COLS)):
             col = RED if (alarm and i==3) else BLACK
@@ -3164,6 +3194,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     save_clients(clients)
                     _update_sensori_file(clients)
                     print(f"  [OK] Aggiornato idx={idx}: {updates.get('cognome','')} {updates.get('nome','')}")
+                    try: _sync_thresholds_to_sensors(clients[idx])
+                    except Exception as _e: print(f"  [CS-DL] Sync soglie fallita: {_e}")
                     self.send_json({"ok":True})
                 else:
                     self.send_json({"ok":False,"error":"indice non valido"},400)
