@@ -675,13 +675,9 @@ def _build_em320_threshold_payload(t_min, t_max):
     condition_byte = 0x0C  # outside=4 | temp_alarm_bit=8
     t_min_raw = int(round(t_min * 10))
     t_max_raw = int(round(t_max * 10))
-    # ff 06 <cond> <tmin_LE 2B> <tmax_LE 2B> <hmin_LE 2B=0> <hmax_LE 2B=0>
-    payload = struct.pack('<BBhh4x', 0xFF, 0x06, condition_byte, t_min_raw, t_max_raw)
-    # Nota: struct non ha 'h' come terzo campo, riscriviamo
-    import struct as s
     buf = bytes([0xFF, 0x06, condition_byte])
-    buf += s.pack('<h', t_min_raw)
-    buf += s.pack('<h', t_max_raw)
+    buf += struct.pack('<h', t_min_raw)
+    buf += struct.pack('<h', t_max_raw)
     buf += bytes(4)  # humidity thresholds = 0
     return buf
 
