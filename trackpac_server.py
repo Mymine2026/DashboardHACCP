@@ -663,8 +663,7 @@ def _rows_ogni_4h(rows, target_date, sensore_nome):
 
 # ── ChirpStack Downlink ─────────────────────────────────────────────────────
 CHIRPSTACK_URL = "http://10.0.1.52:8090"
-CHIRPSTACK_API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjkwNGU0YjkyLWVhNTMtNDBkNi1hYjFlLTkzNjUxZGRhNTJlMSIsInR5cCI6ImtleSJ9.qdOZNF3MqsSDOApGyfHca7TQnhSFiiPMm1jJeyURzB8
-"
+CHIRPSTACK_API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjkwNGU0YjkyLWVhNTMtNDBkNi1hYjFlLTkzNjUxZGRhNTJlMSIsInR5cCI6ImtleSJ9.qdOZNF3MqsSDOApGyfHca7TQnhSFiiPMm1jJeyURzB8"
 
 def _build_em320_threshold_payload(t_min, t_max):
     """
