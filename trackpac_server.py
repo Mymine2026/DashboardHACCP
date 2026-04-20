@@ -1031,8 +1031,10 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
         "Conservare per almeno 12 mesi. In caso di temperature fuori norma annotare azioni correttive e informare il Responsabile HACCP.")
 
     # ── FOOTER ──
-    txt(LM,       BM+10, "F1", 6, LGREY, "MyMine Srl  -  P.IVA IT12038850967  -  info@mymine.io  -  Sistema HACCP IoT")
-    txtR(PW-RM,   BM+10, "F1", 6, LGREY, "Pag. 1/1")
+    _gen_ts = datetime.now().strftime("%d/%m/%Y alle %H:%M")
+    txt(LM,       BM+16, "F1", 6, LGREY, "MyMine Srl  -  P.IVA IT12038850967  -  info@mymine.io  -  Sistema HACCP IoT")
+    txt(LM,       BM+8,  "F1", 6, LGREY, f"Documento generato automaticamente da MyMine il {_gen_ts}  |  Conforme D.Lgs. 193/2007")
+    txtR(PW-RM,   BM+16, "F1", 6, LGREY, "Pag. 1/1")
 
     # ── PDF ASSEMBLY ──
     stream_bytes = "\n".join(ops).encode("latin-1", errors="replace")
@@ -3246,7 +3248,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             client=clients[int(ci)] if ci and ci.isdigit() and int(ci)<len(clients) else None
             if not client: self.send_json({"error":"not found"},404); return
             _ieri=(datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
-            _js = "var v=document.getElementById('selGiorno').value;window.location.href='/report?client='+ci+'&data='+v;"
+            _js = f"var v=document.getElementById('selGiorno').value;window.location.href='/report?client={ci}&data='+v;"
             html=(
                 '<!DOCTYPE html><html><head><meta charset=UTF-8>'
                 '<title>Report Giornaliero HACCP</title>'
