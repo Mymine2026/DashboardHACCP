@@ -55,6 +55,9 @@ TWILIO_FROM_NUMBER = _os.environ.get("TWILIO_FROM_NUMBER", "")
 
 ALERT_INTERVAL = 600
 
+# URL base della dashboard (per link azioni correttive nelle email)
+DASHBOARD_URL = _os.environ.get("DASHBOARD_URL", "https://mymine.cloud")
+
 # ─── CHIRPSTACK INTEGRATION ──────────────────────────────────────────────────
 # Imposta DATA_SOURCE=chirpstack in Dokploy per usare ChirpStack invece di Trackpac.
 # Con DATA_SOURCE=trackpac (default) tutto funziona esattamente come prima.
@@ -122,7 +125,7 @@ def _pg_conn():
         return None
 
 def _pg_init():
-    """Crea la tabella clients se non esiste."""
+    """Crea le tabelle clients e alarms se non esistono."""
     conn = _pg_conn()
     if not conn: return
     try:
@@ -133,8 +136,21 @@ def _pg_init():
                     data JSONB NOT NULL,
                     updated_at TIMESTAMP DEFAULT NOW()
                 )""")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS alarms (
+                    id SERIAL PRIMARY KEY,
+                    token TEXT UNIQUE NOT NULL,
+                    sensor_name TEXT,
+                    location_name TEXT,
+                    temp_value REAL,
+                    threshold_value REAL,
+                    started_at TIMESTAMP DEFAULT NOW(),
+                    status TEXT DEFAULT 'OPEN',
+                    action_text TEXT,
+                    action_recorded_at TIMESTAMP
+                )""")
             conn.commit()
-        print("  [DB] Tabella clients OK")
+        print("  [DB] Tabelle clients + alarms OK")
     except Exception as e:
         print(f"  [DB] Init tabella: {e}")
     finally:
@@ -1220,31 +1236,61 @@ def check_all_alarms():
                 continue
         except: pass
         nome=(client.get("cognome","")+" "+client.get("nome","")).strip()
+        rag_soc=client.get("rag_soc","").strip() or nome
         issues_html="".join("<li>"+x+"</li>" for x in issues)
         issues_text="\n".join("- "+x for x in issues)
-        subj="Allarme MyMine - "+nome
+        subj="Allarme MyMine - "+rag_soc
+        # ── Genera token azione correttiva e salva in DB ──────────────────
+        action_token=_sec.token_hex(20)
+        action_url=DASHBOARD_URL.rstrip("/")+"/azione?token="+action_token
+        _T_al=float(T) if T is not None else 0.0
+        _thr_al=float(t_max if t_max is not None else (t_min if t_min is not None else 0))
+        _conn_al=_pg_conn()
+        if _conn_al:
+            try:
+                with _conn_al.cursor() as _cur_al:
+                    _cur_al.execute(
+                        "INSERT INTO alarms (token,sensor_name,location_name,temp_value,threshold_value) VALUES (%s,%s,%s,%s,%s)",
+                        (action_token,eui,client.get("indirizzo",""),_T_al,_thr_al))
+                _conn_al.commit()
+                print(f"  [ALARM] Token azione creato: {action_token[:12]}...")
+            except Exception as _e_al:
+                print(f"  [ALARM] Errore salvataggio token: {_e_al}"); action_url=None
+            finally: _conn_al.close()
+        else:
+            action_url=None
+        action_btn=(
+            "<div style='margin-top:18px;padding-top:16px;border-top:1px solid #FECACA'>"
+            "<p style='font-size:13px;color:#7F1D1D;margin-bottom:12px'>"
+            "Registra l'azione correttiva intrapresa:</p>"
+            "<a href='"+action_url+"' style='display:inline-block;background:#1DB584;color:#fff;"
+            "padding:11px 22px;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none'>"
+            "&#9998; Inserisci azione correttiva</a></div>"
+        ) if action_url else ""
         html_body=("<div style='font-family:Arial,sans-serif;max-width:580px;margin:0 auto'>"
             "<div style='background:#1F4E3D;padding:18px 24px;border-radius:8px 8px 0 0'>"
             "<span style='color:#1DB584;font-size:20px;font-weight:800'>my</span>"
             "<span style='color:#fff;font-size:20px;font-weight:800'>mine</span></div>"
             "<div style='background:#FEF2F2;border:1px solid #D94F4F;border-top:none;padding:22px 24px;border-radius:0 0 8px 8px'>"
             "<h2 style='color:#D94F4F;margin:0 0 12px'>Valori fuori soglia</h2>"
-            "<p><b>Cliente:</b> "+nome+"</p>"
+            "<p><b>Cliente:</b> "+rag_soc+"</p>"
             "<p><b>Sensore:</b> "+eui+"</p>"
             "<p><b>Indirizzo:</b> "+client.get("indirizzo","")+"</p>"
             "<ul style='color:#B02020'>"+issues_html+"</ul>"
             "<p style='color:#888;font-size:11px'>"+now_str+"</p>"
+            +action_btn+
             "</div></div>")
 
-        print(f"  [ALARM] ⚠ {nome} ({eui}): {issues}")
+        print(f"  [ALARM] ⚠ {rag_soc} ({eui}): {issues}")
         if client.get("notif_email") and client.get("email"):
             send_email(client["email"],subj,html_body)
         else:
             print(f"  [ALARM]   email non inviata: notif_email={client.get('notif_email')}, email={client.get('email','')}")
         if client.get("notif_sms") and client.get("telefono") and SMSAPI_TOKEN:
-            sms_body = f"ALLARME MyMine\nCliente: {nome}\nSensore: {eui}\n{issues_text}\n{now_str}"
-            send_sms(client["telefono"], sms_body)
-        alerts[eui]={"last_sent":now_str,"issues":issues,"nome":nome}
+            sms_body=f"ALLARME MyMine\nCliente: {rag_soc}\nSensore: {eui}\n{issues_text}\n{now_str}"
+            if action_url: sms_body+=f"\nAzione: {action_url}"
+            send_sms(client["telefono"],sms_body)
+        alerts[eui]={"last_sent":now_str,"issues":issues,"nome":rag_soc}
         save_alerts(alerts)
     print(f"  [ALARM] Controllo completato.")
 
@@ -2562,31 +2608,61 @@ def check_all_alarms():
                 continue
         except: pass
         nome=(client.get("cognome","")+" "+client.get("nome","")).strip()
+        rag_soc=client.get("rag_soc","").strip() or nome
         issues_html="".join("<li>"+x+"</li>" for x in issues)
         issues_text="\n".join("- "+x for x in issues)
-        subj="Allarme MyMine - "+nome
+        subj="Allarme MyMine - "+rag_soc
+        # ── Genera token azione correttiva e salva in DB ──────────────────
+        action_token=_sec.token_hex(20)
+        action_url=DASHBOARD_URL.rstrip("/")+"/azione?token="+action_token
+        _T_al=float(T) if T is not None else 0.0
+        _thr_al=float(t_max if t_max is not None else (t_min if t_min is not None else 0))
+        _conn_al=_pg_conn()
+        if _conn_al:
+            try:
+                with _conn_al.cursor() as _cur_al:
+                    _cur_al.execute(
+                        "INSERT INTO alarms (token,sensor_name,location_name,temp_value,threshold_value) VALUES (%s,%s,%s,%s,%s)",
+                        (action_token,eui,client.get("indirizzo",""),_T_al,_thr_al))
+                _conn_al.commit()
+                print(f"  [ALARM] Token azione creato: {action_token[:12]}...")
+            except Exception as _e_al:
+                print(f"  [ALARM] Errore salvataggio token: {_e_al}"); action_url=None
+            finally: _conn_al.close()
+        else:
+            action_url=None
+        action_btn=(
+            "<div style='margin-top:18px;padding-top:16px;border-top:1px solid #FECACA'>"
+            "<p style='font-size:13px;color:#7F1D1D;margin-bottom:12px'>"
+            "Registra l'azione correttiva intrapresa:</p>"
+            "<a href='"+action_url+"' style='display:inline-block;background:#1DB584;color:#fff;"
+            "padding:11px 22px;border-radius:8px;font-weight:700;font-size:14px;text-decoration:none'>"
+            "&#9998; Inserisci azione correttiva</a></div>"
+        ) if action_url else ""
         html_body=("<div style='font-family:Arial,sans-serif;max-width:580px;margin:0 auto'>"
             "<div style='background:#1F4E3D;padding:18px 24px;border-radius:8px 8px 0 0'>"
             "<span style='color:#1DB584;font-size:20px;font-weight:800'>my</span>"
             "<span style='color:#fff;font-size:20px;font-weight:800'>mine</span></div>"
             "<div style='background:#FEF2F2;border:1px solid #D94F4F;border-top:none;padding:22px 24px;border-radius:0 0 8px 8px'>"
             "<h2 style='color:#D94F4F;margin:0 0 12px'>Valori fuori soglia</h2>"
-            "<p><b>Cliente:</b> "+nome+"</p>"
+            "<p><b>Cliente:</b> "+rag_soc+"</p>"
             "<p><b>Sensore:</b> "+eui+"</p>"
             "<p><b>Indirizzo:</b> "+client.get("indirizzo","")+"</p>"
             "<ul style='color:#B02020'>"+issues_html+"</ul>"
             "<p style='color:#888;font-size:11px'>"+now_str+"</p>"
+            +action_btn+
             "</div></div>")
 
-        print(f"  [ALARM] ⚠ {nome} ({eui}): {issues}")
+        print(f"  [ALARM] ⚠ {rag_soc} ({eui}): {issues}")
         if client.get("notif_email") and client.get("email"):
             send_email(client["email"],subj,html_body)
         else:
             print(f"  [ALARM]   email non inviata: notif_email={client.get('notif_email')}, email={client.get('email','')}")
         if client.get("notif_sms") and client.get("telefono") and SMSAPI_TOKEN:
-            sms_body = f"ALLARME MyMine\nCliente: {nome}\nSensore: {eui}\n{issues_text}\n{now_str}"
-            send_sms(client["telefono"], sms_body)
-        alerts[eui]={"last_sent":now_str,"issues":issues,"nome":nome}
+            sms_body=f"ALLARME MyMine\nCliente: {rag_soc}\nSensore: {eui}\n{issues_text}\n{now_str}"
+            if action_url: sms_body+=f"\nAzione: {action_url}"
+            send_sms(client["telefono"],sms_body)
+        alerts[eui]={"last_sent":now_str,"issues":issues,"nome":rag_soc}
         save_alerts(alerts)
     print(f"  [ALARM] Controllo completato.")
 
@@ -3116,9 +3192,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
             client=clients[int(ci)] if ci and ci.isdigit() and int(ci)<len(clients) else None
             if not client: self.send_json({"error":"not found"},404); return
             mesi=["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
-            opts="".join(["<option value={y}-{m:02d}>{nm} {y}</option>".format(y=y,m=m,nm=mesi[m-1]) for y in [2025,2026] for m in range(1,13)])
-            btn='<button onclick="var v=document.getElementById(chr(39)+"s"+chr(39)).value;var p=v.split(chr(39)+"-"+chr(39));location.href=chr(39)+"/report?client='+ci+'&tipo=mensile&anno="+p[0]+"&mese="+p[1]">Scarica PDF</button>'
-            html="<!DOCTYPE html><html><head><meta charset=UTF-8><title>Report</title><style>body{font-family:sans-serif;padding:40px}select,button{padding:10px;font-size:16px;margin:10px;border-radius:8px}button{background:#1DB584;color:#fff;border:none;cursor:pointer}</style></head><body><h2>Report Mensile</h2><select id=s>"+opts+"</select>"+btn+"</body></html>"
+            # Calcola mese precedente per pre-selezione default
+            _first_today=datetime.now().date().replace(day=1)
+            _prev=_first_today-timedelta(days=1)
+            _sel_val="{}-{:02d}".format(_prev.year,_prev.month)
+            opts="".join([
+                '<option value="{y}-{m:02d}"{s}>{nm} {y}</option>'.format(
+                    y=y,m=m,nm=mesi[m-1],
+                    s=' selected' if "{}-{:02d}".format(y,m)==_sel_val else '')
+                for y in [2025,2026] for m in range(1,13)])
+            # Bottone con JS corretto (niente chr() — usa escape Python per le virgolette)
+            html=(
+                '<!DOCTYPE html><html><head><meta charset=UTF-8>'
+                '<title>Report Mensile HACCP</title>'
+                '<style>'
+                'body{font-family:Arial,sans-serif;padding:48px;background:#F0F6F3}'
+                'h2{color:#1F4E3D;margin-bottom:8px}'
+                'p{color:#4E7367;margin-bottom:20px}'
+                'select,button{padding:11px 16px;font-size:15px;margin:6px;border-radius:9px;border:1px solid #CEEADB}'
+                'button{background:#1DB584;color:#fff;border:none;cursor:pointer;font-weight:700;'
+                'box-shadow:0 3px 10px rgba(29,181,132,.3)}'
+                'button:hover{filter:brightness(1.07)}'
+                '</style></head><body>'
+                '<h2>&#128196; Report Mensile HACCP</h2>'
+                '<p>Seleziona mese e anno, poi scarica il PDF:</p>'
+                '<select id="selMese">'+opts+'</select>'
+                '<button onclick="'
+                "var v=document.getElementById('selMese').value;"
+                "var p=v.split('-');"
+                "window.location.href='/report?client="+ci+"&tipo=mensile&anno='+p[0]+'&mese='+p[1];"
+                '">'
+                '&#8595; Scarica PDF</button>'
+                '</body></html>')
             self.send_response(200); self.send_header("Content-Type","text/html; charset=utf-8"); self.end_headers(); self.wfile.write(html.encode()); return
         elif path=="/report":
             ci=qs.get("client",[None])[0]; clients=load_clients()
