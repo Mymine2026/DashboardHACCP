@@ -677,6 +677,38 @@ def _rows_ogni_4h(rows, target_date, sensore_nome):
     return result
 
 
+def _fetch_actions_for_day(sensor_name, date_obj):
+    """
+    Recupera le azioni correttive dal DB per un sensore in un dato giorno.
+    Ritorna dict: {azione_text: str} o {} se nessuna azione.
+    """
+    conn = _pg_conn()
+    if not conn:
+        return {}
+    try:
+        day_start = datetime.combine(date_obj, datetime.min.time())
+        day_end   = datetime.combine(date_obj, datetime.max.time())
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT action_text, action_recorded_at FROM alarms "
+                "WHERE sensor_name=%s AND started_at BETWEEN %s AND %s "
+                "AND status='CLOSED' AND action_text IS NOT NULL "
+                "ORDER BY action_recorded_at",
+                (sensor_name, day_start, day_end)
+            )
+            rows = cur.fetchall()
+        if not rows:
+            return {}
+        # Unisci tutte le azioni del giorno
+        texts = [r[0].strip() for r in rows if r[0]]
+        return {"action": "; ".join(texts)} if texts else {}
+    except Exception as e:
+        print(f"  [PDF] Errore fetch azioni: {e}")
+        return {}
+    finally:
+        conn.close()
+
+
 # ── ChirpStack Downlink ─────────────────────────────────────────────────────
 CHIRPSTACK_URL = "http://10.0.1.52:8090"
 CHIRPSTACK_API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjkwNGU0YjkyLWVhNTMtNDBkNi1hYjFlLTkzNjUxZGRhNTJlMSIsInR5cCI6ImtleSJ9.qdOZNF3MqsSDOApGyfHca7TQnhSFiiPMm1jJeyURzB8"
@@ -775,6 +807,12 @@ def generate_pdf_report(client, tipo="giornaliero", anno=None, mese=None, data=N
                     yday = (datetime.now() - timedelta(days=1)).date()
                 rows = _fetch_frames(dev_id, yday)
                 rows_4h = _rows_ogni_4h(rows, yday, sname)
+                # Recupera azioni correttive dal DB per questo sensore e giorno
+                _actions = _fetch_actions_for_day(sname, yday)
+                _action_text = _actions.get("action", "")
+                # Aggiunge l'azione alle righe anomale (alla prima riga del giorno)
+                if _action_text and rows_4h:
+                    rows_4h[0]["action"] = _action_text
                 mese_anno = yday.strftime("%d/%m/%Y")
             else:  # mensile — 1 riga/giorno con aggregati
                 import calendar
@@ -995,16 +1033,19 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
             if alarm: bg = "1.0 0.88 0.88"
             filledbox(LM, y-RH, TW, RH, bg)
             hline(y-RH, lw=0.2, rgb=LGREY)
+            _act = row.get("action","")[:30] if row.get("action") else ""
             vals = [
                 row.get("giorno",""), row.get("ora",""), row.get("sensore","")[:22],
                 fmt(T_val) if T_val is not None else "",
                 fmt(row.get("H"),0) if row.get("H") is not None else "",
-                "", "",
+                "" if not alarm else "ANOMALIA",
+                _act,
             ]
             cx = LM
             for i,(v,cw) in enumerate(zip(vals,COLS)):
-                col = RED if (alarm and i==3) else BLACK
+                col = RED if (alarm and i in (3,5)) else BLACK
                 if i <= 2: txt(cx+3, y-12, "F1", 8, col, v)
+                elif i == 6: txt(cx+3, y-12, "F1", 7, col, v)  # azioni: testo allineato sinistra
                 else: txtC(cx, cw, y-12, "F1", 8, col, v)
                 if i < len(COLS)-1: vline(cx+cw, y-RH, y, 0.2, LGREY)
                 cx += cw
@@ -1619,6 +1660,129 @@ html{scroll-behavior:smooth}
 
 body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
 """
+
+# ─── AZIONE CORRETTIVA PAGE ──────────────────────────────────────────────────────
+HTML_AZIONE = """<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>MyMine HACCP &middot; Azione Correttiva</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:Outfit,sans-serif;background:linear-gradient(145deg,#0F2D22 0%,#1A3D30 40%,#0E5C3A 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#fff;border-radius:20px;padding:36px;width:100%;max-width:480px;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.logo{font-size:22px;font-weight:800;margin-bottom:18px}
+.logo span:first-child{color:#1DB584}
+.logo span:last-child{color:#1F4E3D}
+h2{font-size:17px;font-weight:700;color:#1A3D30;margin-bottom:4px}
+.sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:#8DBDAF;letter-spacing:.1em;text-transform:uppercase;margin-bottom:20px}
+.alarm-box{background:#FEF2F2;border:1px solid rgba(217,79,79,.3);border-radius:10px;padding:14px 16px;margin-bottom:20px}
+.alarm-row{font-size:12px;color:#7F1D1D;margin-bottom:4px;font-family:'JetBrains Mono',monospace}
+.alarm-row b{color:#D94F4F}
+.field label{display:block;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#4E7367;margin-bottom:5px}
+textarea{width:100%;background:#F0F6F3;border:1.5px solid #CEEADB;color:#1A3D30;border-radius:10px;padding:11px 14px;font-family:Outfit,sans-serif;font-size:13px;font-weight:500;outline:none;transition:all .2s;resize:vertical;min-height:90px}
+textarea:focus{border-color:#1DB584;background:#fff;box-shadow:0 0 0 3px rgba(29,181,132,.12)}
+.btn{width:100%;background:linear-gradient(135deg,#1DB584,#0F9A6E);color:#fff;border:none;border-radius:10px;padding:13px;font-family:Outfit,sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;margin-top:14px;box-shadow:0 4px 14px rgba(29,181,132,.3)}
+.btn:hover{filter:brightness(1.07)}
+.btn:disabled{opacity:.5;cursor:wait}
+.msg{border-radius:8px;padding:10px 14px;font-size:12px;margin-top:12px;display:none}
+.msg.ok{background:#F0FBF6;border:1px solid #CEEADB;color:#0F5132}
+.msg.err{background:#FEF2F2;border:1px solid rgba(217,79,79,.3);color:#D94F4F}
+.closed-box{background:#F0FBF6;border:1px solid #CEEADB;border-radius:10px;padding:16px;margin-bottom:16px}
+</style>
+</head><body>
+<div class="card">
+  <div class="logo"><span>my</span><span>mine</span></div>
+  <h2>Registra Azione Correttiva</h2>
+  <div class="sub">Sistema HACCP &mdash; Conforme D.Lgs. 193/2007</div>
+  <div id="loading" style="color:#8DBDAF;font-family:'JetBrains Mono',monospace;font-size:11px">Caricamento...</div>
+  <div id="main" style="display:none">
+    <div class="alarm-box" id="alarmInfo"></div>
+    <div id="formArea">
+      <div class="field" style="margin-bottom:10px">
+        <label>Descrivi l&#39;azione correttiva intrapresa</label>
+        <textarea id="actionText" placeholder="Es: Abbassato il termostato, chiamato il tecnico, verificata la chiusura della porta..."></textarea>
+      </div>
+      <button class="btn" id="btnSend" onclick="submitAzione()">&#10003; Salva azione correttiva</button>
+      <div class="msg" id="msgBox"></div>
+    </div>
+    <div id="closedArea" style="display:none">
+      <div class="closed-box">
+        <div style="font-size:14px;font-weight:700;color:#0F9A6E;margin-bottom:8px">&#10003; Azione correttiva registrata</div>
+        <div id="closedText" style="font-size:13px;color:#1A3D30;line-height:1.6"></div>
+      </div>
+    </div>
+  </div>
+  <div id="errArea" style="display:none;color:#D94F4F;font-size:13px"></div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const token = params.get('token') || '';
+
+async function load() {
+  if (!token) { showErr('Token mancante nell\\u2019URL'); return; }
+  try {
+    const r = await fetch('/api/azione?token=' + encodeURIComponent(token));
+    const d = await r.json();
+    if (!d.ok) { showErr(d.error || 'Token non valido'); return; }
+    const a = d.alarm;
+    const dt = new Date(a.started_at).toLocaleString('it-IT');
+    document.getElementById('alarmInfo').innerHTML =
+      '<div class="alarm-row">&#128197; <b>Rilevato:</b> ' + dt + '</div>' +
+      '<div class="alarm-row">&#128268; <b>Sensore:</b> ' + (a.sensor_name||'—') + '</div>' +
+      '<div class="alarm-row">&#127979; <b>Ubicazione:</b> ' + (a.location_name||'—') + '</div>' +
+      '<div class="alarm-row">&#127777; <b>Temperatura rilevata:</b> ' + (a.temp_value!=null?a.temp_value.toFixed(1)+'°C':'—') + '</div>';
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('main').style.display = 'block';
+    if (a.status === 'CLOSED' && a.action_text) {
+      document.getElementById('formArea').style.display = 'none';
+      document.getElementById('closedArea').style.display = 'block';
+      document.getElementById('closedText').textContent = a.action_text;
+    }
+  } catch(e) { showErr('Errore di rete: ' + e.message); }
+}
+
+async function submitAzione() {
+  const at = document.getElementById('actionText').value.trim();
+  if (!at) { showMsg('Descrivi l\\u2019azione correttiva prima di salvare.', false); return; }
+  const btn = document.getElementById('btnSend');
+  btn.disabled = true; btn.textContent = 'Salvataggio...';
+  try {
+    const r = await fetch('/api/azione', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: token, action_text: at})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showMsg('\\u2713 Azione correttiva registrata con successo.', true);
+      document.getElementById('btnSend').style.display = 'none';
+      document.getElementById('actionText').disabled = true;
+    } else {
+      showMsg(d.error || 'Errore durante il salvataggio.', false);
+      btn.disabled = false; btn.textContent = '\\u2713 Salva azione correttiva';
+    }
+  } catch(e) {
+    showMsg('Errore di rete: ' + e.message, false);
+    btn.disabled = false; btn.textContent = '\\u2713 Salva azione correttiva';
+  }
+}
+
+function showMsg(t, ok) {
+  const m = document.getElementById('msgBox');
+  m.textContent = t; m.className = 'msg ' + (ok?'ok':'err'); m.style.display = 'block';
+}
+function showErr(t) {
+  document.getElementById('loading').style.display = 'none';
+  const e = document.getElementById('errArea');
+  e.textContent = t; e.style.display = 'block';
+}
+
+load();
+</script>
+</body></html>"""
 
 # ─── LOGIN PAGE ─────────────────────────────────────────────────────────────────
 HTML_LOGIN = """<!DOCTYPE html>
@@ -2922,12 +3086,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # ── Public routes ──
         if path == "/azione":
-            try:
-                import os as _o3
-                _f = _o3.path.join(_o3.path.dirname(__file__), "azione.html")
-                self.send_html(open(_f, encoding="utf-8").read()); return
-            except:
-                self.send_response(404); self.end_headers(); return
+            self.send_html(HTML_AZIONE); return
         if path == "/onboarding":
             try:
                 import os as _os2
@@ -2965,10 +3124,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not conn: self.send_json({"ok":False,"error":"DB non disponibile"},500); return
             try:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id,sensor_name,location_name,temp_value,threshold_value,started_at,status FROM alarms WHERE token=%s",(tq,))
+                    cur.execute("SELECT id,sensor_name,location_name,temp_value,threshold_value,started_at,status,action_text FROM alarms WHERE token=%s",(tq,))
                     row=cur.fetchone()
                 if not row: self.send_json({"ok":False,"error":"token non valido"},404); return
-                self.send_json({"ok":True,"alarm":{"id":str(row[0]),"sensor_name":row[1],"location_name":row[2],"temp_value":float(row[3]),"threshold_value":float(row[4]),"started_at":row[5].isoformat(),"status":row[6]}})
+                self.send_json({"ok":True,"alarm":{"id":str(row[0]),"sensor_name":row[1],"location_name":row[2],"temp_value":float(row[3]) if row[3] is not None else None,"threshold_value":float(row[4]) if row[4] is not None else None,"started_at":row[5].isoformat(),"status":row[6],"action_text":row[7]}})
             except Exception as e: self.send_json({"ok":False,"error":str(e)},500)
             finally: conn.close()
             return
