@@ -1271,6 +1271,56 @@ def _get_val(payload, *keys):
             return float(v)
     return None
 
+def _save_alarm_token(action_token, sensor_name, location, temp_val, thr_val):
+    """
+    Salva il token allarme nel DB. Se la tabella non esiste la crea e riprova.
+    Ritorna True se salvato, False in caso di errore.
+    """
+    CREATE_SQL = """
+        CREATE TABLE IF NOT EXISTS alarms (
+            id SERIAL PRIMARY KEY,
+            token TEXT UNIQUE NOT NULL,
+            sensor_name TEXT,
+            location_name TEXT,
+            temp_value REAL,
+            threshold_value REAL,
+            started_at TIMESTAMP DEFAULT NOW(),
+            status TEXT DEFAULT 'OPEN',
+            action_text TEXT,
+            action_recorded_at TIMESTAMP
+        )"""
+    INSERT_SQL = ("INSERT INTO alarms "
+                  "(token,sensor_name,location_name,temp_value,threshold_value) "
+                  "VALUES (%s,%s,%s,%s,%s)")
+    conn = _pg_conn()
+    if not conn:
+        print("  [ALARM] DB non disponibile — link azione non generato")
+        return False
+    try:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(INSERT_SQL, (action_token, sensor_name, location, temp_val, thr_val))
+            conn.commit()
+            print(f"  [ALARM] Token azione salvato: {action_token[:12]}...")
+            return True
+        except Exception as e1:
+            # Probabile tabella mancante — crea e riprova
+            print(f"  [ALARM] INSERT fallita ({e1}) — creo tabella e riprovo")
+            conn.rollback()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(CREATE_SQL)
+                    cur.execute(INSERT_SQL, (action_token, sensor_name, location, temp_val, thr_val))
+                conn.commit()
+                print(f"  [ALARM] Tabella creata e token salvato: {action_token[:12]}...")
+                return True
+            except Exception as e2:
+                print(f"  [ALARM] Errore salvataggio token (retry): {e2}")
+                return False
+    finally:
+        conn.close()
+
+
 def check_all_alarms():
     clients=load_clients(); alerts=load_alerts()
     now_str=datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
@@ -1339,23 +1389,11 @@ def check_all_alarms():
         subj="Allarme MyMine - "+rag_soc
         # ── Genera token azione correttiva e salva in DB ──────────────────
         action_token=_sec.token_hex(20)
-        action_url=DASHBOARD_URL.rstrip("/")+"/azione?token="+action_token
         _T_al=float(T) if T is not None else 0.0
         _thr_al=float(t_max if t_max is not None else (t_min if t_min is not None else 0))
-        _conn_al=_pg_conn()
-        if _conn_al:
-            try:
-                with _conn_al.cursor() as _cur_al:
-                    _cur_al.execute(
-                        "INSERT INTO alarms (token,sensor_name,location_name,temp_value,threshold_value) VALUES (%s,%s,%s,%s,%s)",
-                        (action_token,eui,client.get("indirizzo",""),_T_al,_thr_al))
-                _conn_al.commit()
-                print(f"  [ALARM] Token azione creato: {action_token[:12]}...")
-            except Exception as _e_al:
-                print(f"  [ALARM] Errore salvataggio token: {_e_al}"); action_url=None
-            finally: _conn_al.close()
-        else:
-            action_url=None
+        _sname_al=next((s.get('nome_frigo',eui[-6:]) for s in client.get('sensori',[]) if s.get('eui','').upper()==eui.upper()), eui[-6:])
+        _ok_al=_save_alarm_token(action_token,_sname_al,client.get("indirizzo",""),_T_al,_thr_al)
+        action_url=(DASHBOARD_URL.rstrip("/")+"/azione?token="+action_token) if _ok_al else None
         action_btn=(
             "<div style='margin-top:18px;padding-top:16px;border-top:1px solid #FECACA'>"
             "<p style='font-size:13px;color:#7F1D1D;margin-bottom:12px'>"
@@ -2834,23 +2872,11 @@ def check_all_alarms():
         subj="Allarme MyMine - "+rag_soc
         # ── Genera token azione correttiva e salva in DB ──────────────────
         action_token=_sec.token_hex(20)
-        action_url=DASHBOARD_URL.rstrip("/")+"/azione?token="+action_token
         _T_al=float(T) if T is not None else 0.0
         _thr_al=float(t_max if t_max is not None else (t_min if t_min is not None else 0))
-        _conn_al=_pg_conn()
-        if _conn_al:
-            try:
-                with _conn_al.cursor() as _cur_al:
-                    _cur_al.execute(
-                        "INSERT INTO alarms (token,sensor_name,location_name,temp_value,threshold_value) VALUES (%s,%s,%s,%s,%s)",
-                        (action_token,eui,client.get("indirizzo",""),_T_al,_thr_al))
-                _conn_al.commit()
-                print(f"  [ALARM] Token azione creato: {action_token[:12]}...")
-            except Exception as _e_al:
-                print(f"  [ALARM] Errore salvataggio token: {_e_al}"); action_url=None
-            finally: _conn_al.close()
-        else:
-            action_url=None
+        _sname_al=next((s.get('nome_frigo',eui[-6:]) for s in client.get('sensori',[]) if s.get('eui','').upper()==eui.upper()), eui[-6:])
+        _ok_al=_save_alarm_token(action_token,_sname_al,client.get("indirizzo",""),_T_al,_thr_al)
+        action_url=(DASHBOARD_URL.rstrip("/")+"/azione?token="+action_token) if _ok_al else None
         action_btn=(
             "<div style='margin-top:18px;padding-top:16px;border-top:1px solid #FECACA'>"
             "<p style='font-size:13px;color:#7F1D1D;margin-bottom:12px'>"
@@ -3116,6 +3142,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except: pass
             self.send_json({"ok":True,"data_file":DATA,"writable":writable,
                 "clients":len(load_clients()),"build":BUILD_TS})
+            return
+        if path == "/api/last_reading":
+            # Endpoint interno per n8n — protetto da chiave API fissa
+            auth = self.headers.get("X-Internal-Key","")
+            _ikey = _os.environ.get("INTERNAL_API_KEY","mymine-internal-2026")
+            if auth != _ikey:
+                self.send_json({"ok":False,"error":"non autorizzato"},401); return
+            eui = qs.get("eui",[None])[0]
+            if not eui:
+                self.send_json({"ok":False,"error":"eui mancante"},400); return
+            eui = eui.upper()
+            frames = cs_load_frames(eui)
+            if not frames:
+                self.send_json({"ok":False,"error":"nessun frame"},404); return
+            def _gts_lr(f):
+                v = f.get("time_created") or f.get("time","")
+                try: return datetime.fromisoformat(v.replace("Z","+00:00"))
+                except: return datetime.min.replace(tzinfo=timezone.utc)
+            sorted_frames = sorted(frames, key=_gts_lr, reverse=True)
+            for f in sorted_frames:
+                p = _get_payload(f)
+                T = _get_val(p,"temperature","temp")
+                H = _get_val(p,"humidity","hum")
+                if T is not None:
+                    self.send_json({
+                        "ok": True,
+                        "eui": eui,
+                        "temperature": T,
+                        "humidity": H,
+                        "time_created": f.get("time_created") or f.get("time","")
+                    }); return
+            self.send_json({"ok":False,"error":"nessuna lettura valida"},404)
             return
         if path == "/api/azione":
             tq=qs.get("token",[None])[0]
