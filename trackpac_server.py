@@ -3407,29 +3407,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
             client=clients[int(ci)] if ci and ci.isdigit() and int(ci)<len(clients) else None
             if not client: self.send_json({"error":"not found"},404); return
             _ieri=(datetime.now()-timedelta(days=1)).strftime("%Y-%m-%d")
-            _js = f"var v=document.getElementById('selGiorno').value;window.location.href='/report?client={ci}&data='+v;"
-            html=(
-                '<!DOCTYPE html><html><head><meta charset=UTF-8>'
-                '<title>Report Giornaliero HACCP</title>'
-                '<style>body{font-family:Arial,sans-serif;padding:48px;background:#F0F6F3}'
-                'h2{color:#1F4E3D;margin-bottom:8px}p{color:#4E7367;margin-bottom:20px}'
-                'input,button{padding:11px 16px;font-size:15px;margin:6px;border-radius:9px;border:1px solid #CEEADB}'
-                'input[type=date]{background:#fff;color:#1A3D30;font-family:Arial}'
-                'button{background:#1DB584;color:#fff;border:none;cursor:pointer;font-weight:700;'
-                'box-shadow:0 3px 10px rgba(29,181,132,.3)}'
-                '</style></head><body>'
-                '<h2>&#128196; Report Giornaliero HACCP</h2>'
-                '<p>Seleziona il giorno, poi scarica il PDF:</p>'
-                '<input type="date" id="selGiorno" value="'+_ieri+'" max="'+_ieri+'">'
-                '<button onclick="'+_js+'">&#8595; Scarica PDF</button>'
-                '</body></html>')
+            _js = f"var v=document.getElementById('selGiorno').value;if(v){{window.location.href='/report?client={ci}&data='+v;}}else{{alert('Seleziona un giorno')}}"
+            _nome = (client.get("rag_soc","") or (client.get("cognome","")+" "+client.get("nome",""))).strip()
+            html = f"""<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<title>Report Giornaliero</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:Outfit,sans-serif;background:linear-gradient(150deg,#0F2D22,#1A3D30 50%,#0E5C3A);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}}
+.card{{background:#fff;border-radius:20px;padding:32px 28px;width:100%;max-width:420px;box-shadow:0 24px 60px rgba(0,0,0,.35)}}
+.logo{{font-size:26px;font-weight:800;margin-bottom:22px;display:flex;align-items:center;gap:8px}}
+.logo .g{{color:#1DB584}}.logo .w{{color:#1F4E3D}}
+.badge{{background:#E8F5EF;color:#0F9A6E;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.05em}}
+h1{{font-size:22px;font-weight:800;color:#1A3D30;margin-bottom:6px}}
+.sub{{font-size:13px;color:#4E7367;margin-bottom:24px;line-height:1.5}}
+.cliente{{background:#F0FBF6;border:1px solid #CEEADB;border-radius:10px;padding:11px 14px;margin-bottom:22px;font-size:13px;color:#1A3D30;font-weight:600}}
+.cliente span{{display:block;font-size:10px;font-weight:500;color:#8DBDAF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}}
+label{{display:block;font-size:11px;font-weight:600;color:#4E7367;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}}
+input[type=date]{{width:100%;background:#F0F6F3;border:2px solid #CEEADB;color:#1A3D30;border-radius:12px;padding:16px 14px;font-family:Outfit,sans-serif;font-size:18px;font-weight:600;outline:none;-webkit-appearance:none;appearance:none;cursor:pointer;transition:border-color .2s}}
+input[type=date]:focus{{border-color:#1DB584;background:#fff}}
+.btn{{display:block;width:100%;background:linear-gradient(135deg,#1DB584,#0F9A6E);color:#fff;border:none;border-radius:12px;padding:18px;font-family:Outfit,sans-serif;font-size:17px;font-weight:700;cursor:pointer;margin-top:18px;box-shadow:0 6px 20px rgba(29,181,132,.35);letter-spacing:.02em;transition:filter .2s,transform .1s}}
+.btn:active{{transform:scale(.98);filter:brightness(.95)}}
+.note{{font-size:11px;color:#8DBDAF;text-align:center;margin-top:14px;line-height:1.6}}
+</style>
+</head><body>
+<div class="card">
+  <div class="logo"><span class="g">my</span><span class="w">mine</span><span class="badge">HACCP</span></div>
+  <h1>&#128196; Report Giornaliero</h1>
+  <div class="sub">Seleziona il giorno e scarica il registro HACCP in formato PDF</div>
+  <div class="cliente"><span>Cliente</span>{_nome}</div>
+  <label for="selGiorno">Giorno del report</label>
+  <input type="date" id="selGiorno" value="{_ieri}" max="{_ieri}">
+  <button class="btn" onclick="{_js}">&#11015; Scarica PDF</button>
+  <div class="note">Il PDF include le misurazioni ogni 4 ore e le eventuali azioni correttive registrate</div>
+</div>
+</body></html>"""
             self.send_response(200); self.send_header("Content-Type","text/html; charset=utf-8"); self.end_headers(); self.wfile.write(html.encode()); return
         elif path=="/reports":
             ci=qs.get("client",[None])[0]; clients=load_clients()
             client=clients[int(ci)] if ci and ci.isdigit() and int(ci)<len(clients) else None
             if not client: self.send_json({"error":"not found"},404); return
             mesi=["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"]
-            # Calcola mese precedente per pre-selezione default
             _first_today=datetime.now().date().replace(day=1)
             _prev=_first_today-timedelta(days=1)
             _sel_val="{}-{:02d}".format(_prev.year,_prev.month)
@@ -3438,29 +3460,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     y=y,m=m,nm=mesi[m-1],
                     s=' selected' if "{}-{:02d}".format(y,m)==_sel_val else '')
                 for y in [2025,2026] for m in range(1,13)])
-            # Bottone con JS corretto (niente chr() — usa escape Python per le virgolette)
-            html=(
-                '<!DOCTYPE html><html><head><meta charset=UTF-8>'
-                '<title>Report Mensile HACCP</title>'
-                '<style>'
-                'body{font-family:Arial,sans-serif;padding:48px;background:#F0F6F3}'
-                'h2{color:#1F4E3D;margin-bottom:8px}'
-                'p{color:#4E7367;margin-bottom:20px}'
-                'select,button{padding:11px 16px;font-size:15px;margin:6px;border-radius:9px;border:1px solid #CEEADB}'
-                'button{background:#1DB584;color:#fff;border:none;cursor:pointer;font-weight:700;'
-                'box-shadow:0 3px 10px rgba(29,181,132,.3)}'
-                'button:hover{filter:brightness(1.07)}'
-                '</style></head><body>'
-                '<h2>&#128196; Report Mensile HACCP</h2>'
-                '<p>Seleziona mese e anno, poi scarica il PDF:</p>'
-                '<select id="selMese">'+opts+'</select>'
-                '<button onclick="'
-                "var v=document.getElementById('selMese').value;"
-                "var p=v.split('-');"
-                "window.location.href='/report?client="+ci+"&tipo=mensile&anno='+p[0]+'&mese='+p[1];"
-                '">'
-                '&#8595; Scarica PDF</button>'
-                '</body></html>')
+            _nome = (client.get("rag_soc","") or (client.get("cognome","")+" "+client.get("nome",""))).strip()
+            _js_m = "var v=document.getElementById('selMese').value;var p=v.split('-');window.location.href='/report?client="+ci+"&tipo=mensile&anno='+p[0]+'&mese='+p[1];"
+            html = f"""<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<title>Report Mensile</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:Outfit,sans-serif;background:linear-gradient(150deg,#0F2D22,#1A3D30 50%,#0E5C3A);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}}
+.card{{background:#fff;border-radius:20px;padding:32px 28px;width:100%;max-width:420px;box-shadow:0 24px 60px rgba(0,0,0,.35)}}
+.logo{{font-size:26px;font-weight:800;margin-bottom:22px;display:flex;align-items:center;gap:8px}}
+.logo .g{{color:#1DB584}}.logo .w{{color:#1F4E3D}}
+.badge{{background:#E8ECF8;color:#2878B0;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:.05em}}
+h1{{font-size:22px;font-weight:800;color:#1A3D30;margin-bottom:6px}}
+.sub{{font-size:13px;color:#4E7367;margin-bottom:24px;line-height:1.5}}
+.cliente{{background:#F0FBF6;border:1px solid #CEEADB;border-radius:10px;padding:11px 14px;margin-bottom:22px;font-size:13px;color:#1A3D30;font-weight:600}}
+.cliente span{{display:block;font-size:10px;font-weight:500;color:#8DBDAF;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}}
+label{{display:block;font-size:11px;font-weight:600;color:#4E7367;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}}
+select{{width:100%;background:#F0F6F3;border:2px solid #CEEADB;color:#1A3D30;border-radius:12px;padding:16px 14px;font-family:Outfit,sans-serif;font-size:18px;font-weight:600;outline:none;-webkit-appearance:none;appearance:none;cursor:pointer;transition:border-color .2s;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='8'%3E%3Cpath d='M0 0l7 8 7-8z' fill='%234E7367'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center}}
+select:focus{{border-color:#2878B0;background-color:#fff}}
+.btn{{display:block;width:100%;background:linear-gradient(135deg,#2878B0,#1a5a8a);color:#fff;border:none;border-radius:12px;padding:18px;font-family:Outfit,sans-serif;font-size:17px;font-weight:700;cursor:pointer;margin-top:18px;box-shadow:0 6px 20px rgba(40,120,176,.35);letter-spacing:.02em;transition:filter .2s,transform .1s}}
+.btn:active{{transform:scale(.98);filter:brightness(.95)}}
+.note{{font-size:11px;color:#8DBDAF;text-align:center;margin-top:14px;line-height:1.6}}
+</style>
+</head><body>
+<div class="card">
+  <div class="logo"><span class="g">my</span><span class="w">mine</span><span class="badge">MENSILE</span></div>
+  <h1>&#128196; Report Mensile</h1>
+  <div class="sub">Seleziona il mese e scarica il registro HACCP riepilogativo in formato PDF</div>
+  <div class="cliente"><span>Cliente</span>{_nome}</div>
+  <label for="selMese">Mese del report</label>
+  <select id="selMese">{opts}</select>
+  <button class="btn" onclick="{_js_m}">&#11015; Scarica PDF</button>
+  <div class="note">Il PDF include T.Min, T.Max e T.Media per ogni giorno del mese selezionato</div>
+</div>
+</body></html>"""
             self.send_response(200); self.send_header("Content-Type","text/html; charset=utf-8"); self.end_headers(); self.wfile.write(html.encode()); return
         elif path=="/report":
             ci=qs.get("client",[None])[0]; clients=load_clients()
