@@ -810,9 +810,24 @@ def generate_pdf_report(client, tipo="giornaliero", anno=None, mese=None, data=N
                 # Recupera azioni correttive dal DB per questo sensore e giorno
                 _actions = _fetch_actions_for_day(sname, yday)
                 _action_text = _actions.get("action", "")
-                # Aggiunge l'azione alle righe anomale (alla prima riga del giorno)
+                # Aggiunge l'azione alla prima riga anomala; se nessuna anomalia alla prima riga
                 if _action_text and rows_4h:
-                    rows_4h[0]["action"] = _action_text
+                    _placed = False
+                    for _ar in rows_4h:
+                        _T_ar = _ar.get("T")
+                        _s0 = _ar.get("_sens", {})
+                        _tmin_ar = float(_s0.get("t_min")) if isinstance(_s0, dict) and _s0.get("t_min") is not None else (_t_min_cfg and float(_t_min_cfg))
+                        _tmax_ar = float(_s0.get("t_max")) if isinstance(_s0, dict) and _s0.get("t_max") is not None else (_t_max_cfg and float(_t_max_cfg))
+                        _alarm_ar = (_T_ar is not None and (
+                            (_tmin_ar is not None and _T_ar < _tmin_ar) or
+                            (_tmax_ar is not None and _T_ar > _tmax_ar)
+                        ))
+                        if _alarm_ar:
+                            _ar["action"] = _action_text
+                            _placed = True
+                            break
+                    if not _placed:
+                        rows_4h[0]["action"] = _action_text
                 mese_anno = yday.strftime("%d/%m/%Y")
             else:  # mensile — 1 riga/giorno con aggregati
                 import calendar
@@ -967,12 +982,22 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
     y -= 22
 
     # ── TEMP RIFERIMENTO ──
-    tbh = 22
+    # Costruisci stringa soglie configurate per questo sensore
+    _sens0 = (client.get("sensori") or [{}])[0]
+    _tcfg_min = _sens0.get("t_min") if _sens0.get("t_min") is not None else client.get("t_min")
+    _tcfg_max = _sens0.get("t_max") if _sens0.get("t_max") is not None else client.get("t_max")
+    _soglie_parts = []
+    if _tcfg_min is not None: _soglie_parts.append(f"T.Min configurata: {_tcfg_min} grC")
+    if _tcfg_max is not None: _soglie_parts.append(f"T.Max configurata: {_tcfg_max} grC")
+    _soglie_str = "   |   ".join(_soglie_parts)
+    tbh = 33 if _soglie_str else 22
     filledbox(LM, y-tbh, TW, tbh, LBLUE)
     strokedbox(LM, y-tbh, TW, tbh, "0.6 0.7 0.9")
     txt(LM+5, y-9,  "F2", 8, DBLUE, "TEMPERATURE DI RIFERIMENTO:")
     txt(LM+5, y-18, "F1", 7, DBLUE,
         "Prodotti Freschi: 0/+4 grC   |   Prodotti Surgelati: -18 grC (+-3 grC)   |   Prodotti Congelati: -12 grC")
+    if _soglie_str:
+        txt(LM+5, y-27, "F2", 7, DBLUE, f"Soglie impostate per questo sensore: {_soglie_str}")
     y -= tbh+4
 
     # ── TABLE HEADER ──
@@ -1058,7 +1083,8 @@ def _build_pdf(nome, client, date_str, rows_4h, mese_anno, tipo="giornaliero"):
     fy = BM+58
     hline(fy+2, lw=0.8, rgb=LGREY)
     resp_l = f"Firma Resp. HACCP ({resp}): " if resp else "Firma Responsabile HACCP: "
-    txt(LM,            fy-8,  "F1", 8, BLACK, "Data compilazione: _____ / _____ / _________")
+    _data_comp = datetime.now().strftime("%d / %m / %Y")
+    txt(LM,            fy-8,  "F1", 8, BLACK, f"Data compilazione: {_data_comp}")
     txt(LM,            fy-22, "F1", 8, BLACK, resp_l+"_____________________________")
     rx = LM+TW//2+10
     txt(rx,            fy-8,  "F1", 8, BLACK, "Data controllo ASL: _____ / _____ / _________")
