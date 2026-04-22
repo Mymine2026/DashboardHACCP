@@ -812,15 +812,17 @@ def generate_pdf_report(client, tipo="giornaliero", anno=None, mese=None, data=N
                 _action_text = _actions.get("action", "")
                 # Aggiunge l'azione alla prima riga anomala; se nessuna anomalia alla prima riga
                 if _action_text and rows_4h:
+                    # Soglie dal sensore corrente (disponibili in questo scope)
+                    _tmin_scope = _s.get("t_min") if _s.get("t_min") is not None else client.get("t_min")
+                    _tmax_scope = _s.get("t_max") if _s.get("t_max") is not None else client.get("t_max")
+                    _tmin_scope = float(_tmin_scope) if _tmin_scope is not None else None
+                    _tmax_scope = float(_tmax_scope) if _tmax_scope is not None else None
                     _placed = False
                     for _ar in rows_4h:
                         _T_ar = _ar.get("T")
-                        _s0 = _ar.get("_sens", {})
-                        _tmin_ar = float(_s0.get("t_min")) if isinstance(_s0, dict) and _s0.get("t_min") is not None else (_t_min_cfg and float(_t_min_cfg))
-                        _tmax_ar = float(_s0.get("t_max")) if isinstance(_s0, dict) and _s0.get("t_max") is not None else (_t_max_cfg and float(_t_max_cfg))
                         _alarm_ar = (_T_ar is not None and (
-                            (_tmin_ar is not None and _T_ar < _tmin_ar) or
-                            (_tmax_ar is not None and _T_ar > _tmax_ar)
+                            (_tmin_scope is not None and _T_ar < _tmin_scope) or
+                            (_tmax_scope is not None and _T_ar > _tmax_scope)
                         ))
                         if _alarm_ar:
                             _ar["action"] = _action_text
