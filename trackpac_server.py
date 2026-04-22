@@ -2545,6 +2545,8 @@ select:hover{border-color:var(--green);color:var(--text)}
   <div class="di"><label>EUI Sensore</label><span id="dEui" style="color:var(--green)">—</span></div>
   <div class="di"><label>Frigorifero</label><span id="dFrigo" style="color:var(--green)">—</span></div>
   <div class="di"><label>Aggiornato</label><span id="dRef">—</span></div>
+  <div class="di" id="diGw" style="display:none"><label>Gateway Helium</label><span id="dGw">—</span></div>
+  <div class="di" id="diSig" style="display:none"><label>Segnale</label><span id="dSig">—</span></div>
 </div>
 <div class="cards">
   <div class="card" style="--c:#D94F4F"><div class="card-top"></div><div class="card-glow"></div>
@@ -2624,6 +2626,8 @@ async function load(){
     document.getElementById('vN').textContent=frames.length;
     document.getElementById('vNs').textContent='negli ultimi '+days+' gg';
     document.getElementById('dRef').textContent=new Date().toLocaleTimeString('it-IT');
+    // Info segnale solo per admin
+    try{const _me2=await(await fetch('/api/me')).json();if(_me2.role==='admin'){const _sig=await(await fetch('/api/signal_info?eui='+_eui)).json();if(_sig.ok){document.getElementById('diGw').style.display='';document.getElementById('diSig').style.display='';document.getElementById('dGw').textContent=_sig.gw_count+' gw';const _sc={alto:'#1DB584',medio:'#D4891A',basso:'#D94F4F'};const _sEl=document.getElementById('dSig');_sEl.textContent=_sig.signal+(_sig.rssi?' ('+_sig.rssi+'dBm)':'');_sEl.style.color=_sc[_sig.signal]||'#4E7367';}}}catch(_e2){}
     if(frames.length>0){rCards();rCharts(+days);}
     const lt=frames.length?gTs(frames[frames.length-1]):null;
     const on=lt&&(Date.now()-lt)<7200000;
@@ -3672,6 +3676,36 @@ select:focus{{border-color:#2878B0;background-color:#fff}}
         else: self.send_response(404); self.end_headers()
 
     def do_POST(self):
+        if self.path.startswith("/api/signal_info"):
+            eui_q = qs.get("eui", [None])[0]
+            if not eui_q:
+                self.send_json({"ok": False, "error": "eui mancante"}, 400); return
+            eui_q = eui_q.upper()
+            frames = cs_load_frames(eui_q)
+            if not frames:
+                self.send_json({"ok": False, "error": "nessun frame"}); return
+            # Ultimi 5 frame per media
+            recent = frames[-5:]
+            rssi_vals = [f.get("rssi") for f in recent if f.get("rssi") is not None]
+            gw_vals   = [f.get("gw_count", 1) for f in recent]
+            avg_rssi  = round(sum(rssi_vals) / len(rssi_vals)) if rssi_vals else None
+            avg_gw    = round(sum(gw_vals) / len(gw_vals), 1)
+            # Classifica segnale: alto > -70, medio -70/-90, basso < -90
+            if avg_rssi is None:
+                signal = "n/d"
+            elif avg_rssi > -70:
+                signal = "alto"
+            elif avg_rssi > -90:
+                signal = "medio"
+            else:
+                signal = "basso"
+            self.send_json({
+                "ok": True,
+                "eui": eui_q,
+                "rssi": avg_rssi,
+                "gw_count": avg_gw,
+                "signal": signal,
+            }); return
         if self.path.startswith("/api/uplink"):
             """
             Riceve uplink da ChirpStack HTTP Integration.
@@ -3693,6 +3727,7 @@ select:focus{{border-color:#2878B0;background-color:#fff}}
                     self.send_json({"ok": False, "error": "devEui mancante"}, 400)
                     return
                 ts_str = event.get("time") or datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+                _rx_info = event.get("rxInfo") or []
                 frame  = {
                     "time_created":    ts_str,
                     "time":            ts_str,
@@ -3703,8 +3738,9 @@ select:focus{{border-color:#2878B0;background-color:#fff}}
                     "f_cnt":           event.get("fCnt", 0),
                     "dr":              event.get("dr"),
                     "frequency":       event.get("frequency"),
-                    "snr":  (event.get("rxInfo") or [{}])[0].get("snr"),
-                    "rssi": (event.get("rxInfo") or [{}])[0].get("rssi"),
+                    "snr":  _rx_info[0].get("snr")  if _rx_info else None,
+                    "rssi": _rx_info[0].get("rssi") if _rx_info else None,
+                    "gw_count": len(_rx_info),
                 }
                 cs_save_frame(dev_eui, frame)
                 payload = frame["decoded_payload"]
