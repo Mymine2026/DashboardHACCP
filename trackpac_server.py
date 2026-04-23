@@ -3647,6 +3647,27 @@ select:focus{{border-color:#2878B0;background-color:#fff}}
                         "last_uplink": last_ts or "nessuno",
                     })
             self.send_json(result)
+        elif self.path.startswith('/api/signal_info'):
+            from urllib.parse import parse_qs as _pqs, urlparse as _upl
+            _qs2 = _pqs(_upl(self.path).query)
+            eui_q = _qs2.get('eui', [None])[0]
+            if not eui_q:
+                self.send_json({'ok': False, 'error': 'eui mancante'}, 400); return
+            eui_q = eui_q.upper()
+            frames = cs_load_frames(eui_q)
+            if not frames:
+                self.send_json({'ok': False, 'error': 'nessun frame'}); return
+            recent = frames[-5:]
+            rssi_vals = [f.get('rssi') for f in recent if f.get('rssi') is not None]
+            gw_vals   = [f.get('gw_count', 1) for f in recent]
+            avg_rssi  = round(sum(rssi_vals) / len(rssi_vals)) if rssi_vals else None
+            avg_gw    = round(sum(gw_vals) / len(gw_vals), 1)
+            if avg_rssi is None: signal = 'n/d'
+            elif avg_rssi > -70: signal = 'alto'
+            elif avg_rssi > -90: signal = 'medio'
+            else: signal = 'basso'
+            self.send_json({'ok': True, 'eui': eui_q, 'rssi': avg_rssi,
+                            'gw_count': avg_gw, 'signal': signal}); return
         else: self.send_response(404); self.end_headers()
 
     def do_PUT(self):
