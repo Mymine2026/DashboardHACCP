@@ -3747,6 +3747,11 @@ select:focus{{border-color:#2878B0;background-color:#fff}}
                     print("  [UPLINK] Evento senza devEui ignorato")
                     self.send_json({"ok": False, "error": "devEui mancante"}, 400)
                     return
+                # Salta eventi non-uplink (join, ack, ecc.) - non hanno payload dati
+                _event_type = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("event", ["up"])[0]
+                if _event_type != "up":
+                    print(f"  [UPLINK] Evento '{_event_type}' per {dev_eui} ignorato (non uplink dati)")
+                    self.send_json({"ok": True, "skipped": _event_type}); return
                 ts_str = event.get("time") or datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
                 _rx_info = event.get("rxInfo") or []
                 frame  = {
